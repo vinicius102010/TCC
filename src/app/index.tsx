@@ -113,10 +113,6 @@ export default function ChatScreen() {
       style={styles.container}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Tutor de Matemática</Text>
-      </View>
-
       <FlatList
         data={messages}
         keyExtractor={(item) => item.id}
@@ -142,8 +138,6 @@ export default function ChatScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F0F2F5" },
-  header: { padding: 20, backgroundColor: "#0056b3", alignItems: "center" },
-  headerTitle: { color: "#FFF", fontSize: 18, fontWeight: "bold" },
   messageList: { padding: 16, paddingBottom: 20 },
   messageBubble: {
     maxWidth: "80%",

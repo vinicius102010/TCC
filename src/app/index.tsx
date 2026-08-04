@@ -1,4 +1,14 @@
-import { useState } from "react";
+import {
+  addDoc,
+  collection,
+  doc,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  setDoc,
+} from "firebase/firestore";
+import { useEffect, useState } from "react";
 import {
   FlatList,
   KeyboardAvoidingView,
@@ -9,46 +19,74 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { db } from "../config/firebase";
 
-// Tipagem básica para as mensagens
 type Message = {
   id: string;
   text: string;
   sender: "user" | "ai";
+  createdAt?: any;
 };
 
 export default function ChatScreen() {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "1",
-      text: "Olá! Sou o seu tutor de matemática. Qual dúvida vamos resolver hoje?",
-      sender: "ai",
-    },
-  ]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState("");
 
-  const sendMessage = () => {
+  // Simulando um ID de sessão.
+  // No futuro, quando houver login, isso será gerado dinamicamente para cada aluno/conversa.
+  const sessionId = "sessao-teste-001";
+
+  // Busca as mensagens na subcoleção específica desta sessão
+  useEffect(() => {
+    const messagesRef = collection(db, "conversations", sessionId, "messages");
+    const q = query(messagesRef, orderBy("createdAt", "asc"));
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const loadedMessages = snapshot.docs.map((document) => ({
+        id: document.id,
+        ...document.data(),
+      })) as Message[];
+
+      setMessages(loadedMessages);
+    });
+
+    return () => unsubscribe();
+  }, [sessionId]);
+
+  const sendMessage = async () => {
     if (inputText.trim() === "") return;
 
-    // Adiciona a mensagem do usuário
-    const newUserMessage: Message = {
-      id: Date.now().toString(),
-      text: inputText,
-      sender: "user",
-    };
-
-    setMessages((prev) => [...prev, newUserMessage]);
+    const textToSend = inputText;
     setInputText("");
 
-    // Aqui entrará a futura integração com a API da LLM/RAG
-    // Por enquanto, simulamos uma resposta vazia ou genérica
-    setTimeout(() => {
-      const aiResponse: Message = {
-        id: (Date.now() + 1).toString(),
-        text: "Em breve, pensarei de forma socrática sobre isso....",
+    // Referência para o documento pai (a conversa em si) e para a subcoleção (as mensagens)
+    const sessionDocRef = doc(db, "conversations", sessionId);
+    const messagesRef = collection(db, "conversations", sessionId, "messages");
+
+    // Garante que o documento da conversa existe para armazenar metadados (útil para a telemetria do TCC)
+    await setDoc(
+      sessionDocRef,
+      {
+        alunoId: "aluno-anonimo",
+        ultimaInteracao: serverTimestamp(),
+      },
+      { merge: true },
+    );
+
+    // Salva a mensagem do usuário na subcoleção
+    await addDoc(messagesRef, {
+      text: textToSend,
+      sender: "user",
+      createdAt: serverTimestamp(),
+    });
+
+    // Simula a resposta socrática da IA sendo salva após 1 segundo
+    setTimeout(async () => {
+      await addDoc(messagesRef, {
+        text: "Analisando a sua dúvida de forma estruturada...",
         sender: "ai",
-      };
-      setMessages((prev) => [...prev, aiResponse]);
+        createdAt: serverTimestamp(),
+      });
     }, 1000);
   };
 
@@ -103,24 +141,10 @@ export default function ChatScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#F0F2F5",
-  },
-  header: {
-    padding: 20,
-    backgroundColor: "#0056b3",
-    alignItems: "center",
-  },
-  headerTitle: {
-    color: "#FFF",
-    fontSize: 18,
-    fontWeight: "bold",
-  },
-  messageList: {
-    padding: 16,
-    paddingBottom: 20,
-  },
+  container: { flex: 1, backgroundColor: "#F0F2F5" },
+  header: { padding: 20, backgroundColor: "#0056b3", alignItems: "center" },
+  headerTitle: { color: "#FFF", fontSize: 18, fontWeight: "bold" },
+  messageList: { padding: 16, paddingBottom: 20 },
   messageBubble: {
     maxWidth: "80%",
     padding: 12,
@@ -139,16 +163,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#E0E0E0",
   },
-  messageText: {
-    fontSize: 16,
-    lineHeight: 22,
-  },
-  userText: {
-    color: "#FFFFFF",
-  },
-  aiText: {
-    color: "#333333",
-  },
+  messageText: { fontSize: 16, lineHeight: 22 },
+  userText: { color: "#FFFFFF" },
+  aiText: { color: "#333333" },
   inputContainer: {
     flexDirection: "row",
     padding: 12,
@@ -173,8 +190,5 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     justifyContent: "center",
   },
-  sendButtonText: {
-    color: "#FFFFFF",
-    fontWeight: "bold",
-  },
+  sendButtonText: { color: "#FFFFFF", fontWeight: "bold" },
 });

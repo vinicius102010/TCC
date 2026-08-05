@@ -20,6 +20,7 @@ import {
   View,
 } from "react-native";
 import { db } from "../config/firebase";
+import { useChat } from "../context/ChatContext";
 
 type Message = {
   id: string;
@@ -32,13 +33,23 @@ export default function ChatScreen() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState("");
 
-  // Simulando um ID de sessão.
-  // No futuro, quando houver login, isso será gerado dinamicamente para cada aluno/conversa.
-  const sessionId = "sessao-teste-001";
+  // Puxa as variáveis do Contexto que acabamos de criar
+  const { activeSessionId, setActiveSessionId, isDarkMode } = useChat();
+  const styles = getChatStyles(isDarkMode);
 
-  // Busca as mensagens na subcoleção específica desta sessão
   useEffect(() => {
-    const messagesRef = collection(db, "conversations", sessionId, "messages");
+    // Se clicou em "Nova Conversa" (null), limpa a tela de mensagens
+    if (!activeSessionId) {
+      setMessages([]);
+      return;
+    }
+
+    const messagesRef = collection(
+      db,
+      "conversations",
+      activeSessionId,
+      "messages",
+    );
     const q = query(messagesRef, orderBy("createdAt", "asc"));
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -51,7 +62,7 @@ export default function ChatScreen() {
     });
 
     return () => unsubscribe();
-  }, [sessionId]);
+  }, [activeSessionId]);
 
   const sendMessage = async () => {
     if (inputText.trim() === "") return;
@@ -59,28 +70,45 @@ export default function ChatScreen() {
     const textToSend = inputText;
     setInputText("");
 
-    // Referência para o documento pai (a conversa em si) e para a subcoleção (as mensagens)
-    const sessionDocRef = doc(db, "conversations", sessionId);
-    const messagesRef = collection(db, "conversations", sessionId, "messages");
+    let currentSessionId = activeSessionId;
 
-    // Garante que o documento da conversa existe para armazenar metadados (útil para a telemetria do TCC)
-    await setDoc(
-      sessionDocRef,
-      {
+    // Se for a PRIMEIRA mensagem de uma nova conversa
+    if (!currentSessionId) {
+      // Gera um ID novo aleatório para a coleção principal
+      const newSessionRef = doc(collection(db, "conversations"));
+      currentSessionId = newSessionRef.id;
+
+      // Atualiza o documento pai com dados de telemetria
+      await setDoc(newSessionRef, {
         alunoId: "aluno-anonimo",
         ultimaInteracao: serverTimestamp(),
-      },
-      { merge: true },
+      });
+
+      // Avisa o resto do aplicativo qual é a sessão atual
+      setActiveSessionId(currentSessionId);
+    } else {
+      // Se já existe a conversa, apenas atualiza o "visto por último" para subir no histórico
+      const sessionDocRef = doc(db, "conversations", currentSessionId);
+      await setDoc(
+        sessionDocRef,
+        { ultimaInteracao: serverTimestamp() },
+        { merge: true },
+      );
+    }
+
+    const messagesRef = collection(
+      db,
+      "conversations",
+      currentSessionId,
+      "messages",
     );
 
-    // Salva a mensagem do usuário na subcoleção
     await addDoc(messagesRef, {
       text: textToSend,
       sender: "user",
       createdAt: serverTimestamp(),
     });
 
-    // Simula a resposta socrática da IA sendo salva após 1 segundo
     setTimeout(async () => {
       await addDoc(messagesRef, {
         text: "Analisando a sua dúvida de forma estruturada...",
@@ -113,9 +141,14 @@ export default function ChatScreen() {
       style={styles.container}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Tutor de Matemática</Text>
-      </View>
+      {/* Mensagem de boas vindas caso seja uma tela de "Nova Conversa" vazia */}
+      {!activeSessionId && messages.length === 0 && (
+        <View style={styles.emptyStateContainer}>
+          <Text style={styles.emptyStateTitle}>
+            Olá! Como posso te guiar hoje?
+          </Text>
+        </View>
+      )}
 
       <FlatList
         data={messages}
@@ -140,55 +173,65 @@ export default function ChatScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F0F2F5" },
-  header: { padding: 20, backgroundColor: "#0056b3", alignItems: "center" },
-  headerTitle: { color: "#FFF", fontSize: 18, fontWeight: "bold" },
-  messageList: { padding: 16, paddingBottom: 20 },
-  messageBubble: {
-    maxWidth: "80%",
-    padding: 12,
-    borderRadius: 16,
-    marginBottom: 10,
-  },
-  userBubble: {
-    backgroundColor: "#0056b3",
-    alignSelf: "flex-end",
-    borderBottomRightRadius: 4,
-  },
-  aiBubble: {
-    backgroundColor: "#FFFFFF",
-    alignSelf: "flex-start",
-    borderBottomLeftRadius: 4,
-    borderWidth: 1,
-    borderColor: "#E0E0E0",
-  },
-  messageText: { fontSize: 16, lineHeight: 22 },
-  userText: { color: "#FFFFFF" },
-  aiText: { color: "#333333" },
-  inputContainer: {
-    flexDirection: "row",
-    padding: 12,
-    backgroundColor: "#FFFFFF",
-    borderTopWidth: 1,
-    borderColor: "#E0E0E0",
-    alignItems: "center",
-  },
-  input: {
-    flex: 1,
-    backgroundColor: "#F0F2F5",
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    fontSize: 16,
-    marginRight: 10,
-  },
-  sendButton: {
-    backgroundColor: "#0056b3",
-    borderRadius: 20,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    justifyContent: "center",
-  },
-  sendButtonText: { color: "#FFFFFF", fontWeight: "bold" },
-});
+const getChatStyles = (isDarkMode: boolean) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: isDarkMode ? "#121212" : "#F0F2F5" },
+    emptyStateContainer: {
+      flex: 1,
+      justifyContent: "center",
+      alignItems: "center",
+    },
+    emptyStateTitle: {
+      fontSize: 20,
+      color: isDarkMode ? "#666" : "#0056b3",
+      fontWeight: "bold",
+    },
+    messageList: { padding: 16, paddingBottom: 20, flexGrow: 1 },
+    messageBubble: {
+      maxWidth: "80%",
+      padding: 12,
+      borderRadius: 16,
+      marginBottom: 10,
+    },
+    userBubble: {
+      backgroundColor: isDarkMode ? "#272753" : "#0056b3",
+      alignSelf: "flex-end",
+      borderBottomRightRadius: 4,
+    },
+    aiBubble: {
+      backgroundColor: isDarkMode ? "#1E1E2D" : "#FFFFFF",
+      alignSelf: "flex-start",
+      borderBottomLeftRadius: 4,
+      borderWidth: 1,
+      borderColor: isDarkMode ? "#333" : "#E0E0E0",
+    },
+    messageText: { fontSize: 16, lineHeight: 22 },
+    userText: { color: "#FFFFFF" },
+    aiText: { color: isDarkMode ? "#E0E0E0" : "#333333" },
+    inputContainer: {
+      flexDirection: "row",
+      padding: 12,
+      backgroundColor: isDarkMode ? "#1E1E2D" : "#FFFFFF",
+      borderTopWidth: 1,
+      borderColor: isDarkMode ? "#333" : "#E0E0E0",
+      alignItems: "center",
+    },
+    input: {
+      flex: 1,
+      backgroundColor: isDarkMode ? "#121212" : "#F0F2F5",
+      color: isDarkMode ? "#FFF" : "#333",
+      borderRadius: 20,
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      fontSize: 16,
+      marginRight: 10,
+    },
+    sendButton: {
+      backgroundColor: "#272753",
+      borderRadius: 20,
+      paddingVertical: 10,
+      paddingHorizontal: 16,
+      justifyContent: "center",
+    },
+    sendButtonText: { color: "#FFFFFF", fontWeight: "bold" },
+  });

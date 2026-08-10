@@ -8,16 +8,17 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import Icon from "react-native-vector-icons/MaterialCommunityIcons";
 import { useChat } from "../context/ChatContext";
 
 export default function LoginScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false); // Estado para controlar a visibilidade da senha
 
   const { isDarkMode } = useChat();
   const styles = getLoginStyles(isDarkMode);
 
-  // Estas funções serão conectadas ao Firebase no próximo passo
   const handleEmailLogin = () => {
     console.log("Tentando logar com:", email, password);
   };
@@ -45,14 +46,27 @@ export default function LoginScreen() {
           autoCapitalize="none"
         />
 
-        <TextInput
-          style={styles.input}
-          placeholder="Sua senha"
-          placeholderTextColor={isDarkMode ? "#888" : "#aaa"}
-          value={password}
-          onChangeText={setPassword}
-          secureTextEntry
-        />
+        {/* Container do Input de Senha + Ícone */}
+        <View style={styles.passwordContainer}>
+          <TextInput
+            style={styles.passwordInput}
+            placeholder="Sua senha"
+            placeholderTextColor={isDarkMode ? "#888" : "#aaa"}
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry={!showPassword} // Inverte a visibilidade baseado no estado
+          />
+          <TouchableOpacity
+            style={styles.eyeIcon}
+            onPress={() => setShowPassword(!showPassword)}
+          >
+            <Icon
+              name={showPassword ? "eye-off" : "eye"} // Troca o ícone dinamicamente
+              size={24}
+              color={isDarkMode ? "#888" : "#aaa"}
+            />
+          </TouchableOpacity>
+        </View>
 
         <TouchableOpacity
           style={styles.primaryButton}
@@ -71,7 +85,13 @@ export default function LoginScreen() {
           style={styles.googleButton}
           onPress={handleGoogleLogin}
         >
-          <Text style={styles.googleButtonText}>🌐 Continuar com o Google</Text>
+          <Icon
+            name="google"
+            size={20}
+            color={isDarkMode ? "#FFF" : "#db4a39"} // Vermelho Google no modo claro, branco no escuro
+            style={styles.googleIcon}
+          />
+          <Text style={styles.googleButtonText}>Continuar com o Google</Text>
         </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
@@ -122,6 +142,25 @@ const getLoginStyles = (isDarkMode: boolean) =>
       borderWidth: 1,
       borderColor: isDarkMode ? "#333" : "#E0E0E0",
     },
+    passwordContainer: {
+      flexDirection: "row",
+      alignItems: "center",
+      backgroundColor: isDarkMode ? "#121212" : "#F0F2F5",
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: isDarkMode ? "#333" : "#E0E0E0",
+      marginBottom: 16,
+    },
+    passwordInput: {
+      flex: 1,
+      color: isDarkMode ? "#FFF" : "#333",
+      paddingHorizontal: 16,
+      paddingVertical: 14,
+      fontSize: 16,
+    },
+    eyeIcon: {
+      padding: 12,
+    },
     primaryButton: {
       backgroundColor: "#0056b3",
       paddingVertical: 14,
@@ -150,12 +189,17 @@ const getLoginStyles = (isDarkMode: boolean) =>
       fontWeight: "bold",
     },
     googleButton: {
+      flexDirection: "row", // Alinha o ícone e o texto horizontalmente
       backgroundColor: isDarkMode ? "#272753" : "#FFFFFF",
       borderWidth: isDarkMode ? 0 : 1,
       borderColor: "#E0E0E0",
       paddingVertical: 14,
       borderRadius: 8,
       alignItems: "center",
+      justifyContent: "center",
+    },
+    googleIcon: {
+      marginRight: 10,
     },
     googleButtonText: {
       color: isDarkMode ? "#FFFFFF" : "#333333",

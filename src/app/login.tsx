@@ -1,3 +1,4 @@
+import Icon from "@expo/vector-icons/MaterialCommunityIcons";
 import { useState } from "react";
 import {
   KeyboardAvoidingView,
@@ -8,7 +9,6 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import Icon from "react-native-vector-icons/MaterialCommunityIcons";
 import { useChat } from "../context/ChatContext";
 
 export default function LoginScreen() {

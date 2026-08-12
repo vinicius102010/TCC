@@ -1,4 +1,4 @@
-import { Slot } from "expo-router";
+import { Slot, useRouter, useSegments } from "expo-router";
 import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
 import { useEffect, useState } from "react";
 import {
@@ -11,20 +11,42 @@ import {
 } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { db } from "../config/firebase";
+import { AuthProvider, useAuth } from "../context/AuthContext"; // Importamos a Autenticação
 import { ChatProvider, useChat } from "../context/ChatContext";
 
 function MainLayout() {
   const [isMenuOpen, setIsMenuOpen] = useState(Platform.OS === "web");
   const [conversations, setConversations] = useState<any[]>([]);
 
-  // Puxamos também as funções de tema do contexto
   const { activeSessionId, setActiveSessionId, isDarkMode, toggleTheme } =
     useChat();
 
-  // Passamos o estado atual para gerar as cores corretas
+  // Puxamos os dados do usuário e as ferramentas de navegação
+  const { user, isLoading } = useAuth();
+  const segments = useSegments();
+  const router = useRouter();
+
   const styles = getLayoutStyles(isDarkMode);
 
+  // PROTEÇÃO DE ROTAS
   useEffect(() => {
+    if (isLoading) return; // Espera o Firebase dar a resposta final antes de fazer qualquer coisa
+
+    const isLoginPage = segments[0] === "login";
+
+    if (!user && !isLoginPage) {
+      // Se não tem usuário logado e tentou acessar o chat, chuta pro login
+      router.replace("/login");
+    } else if (user && isLoginPage) {
+      // Se já está logado e tentou acessar a tela de login, joga pro chat
+      router.replace("/");
+    }
+  }, [user, isLoading, segments]);
+
+  // Busca do histórico de conversas (Agora só roda se o usuário estiver logado)
+  useEffect(() => {
+    if (!user) return;
+
     const q = query(
       collection(db, "conversations"),
       orderBy("ultimaInteracao", "desc"),
@@ -37,7 +59,7 @@ function MainLayout() {
       setConversations(sessions);
     });
     return () => unsubscribe();
-  }, []);
+  }, [user]);
 
   const handleNewChat = () => {
     setActiveSessionId(null);
@@ -49,9 +71,32 @@ function MainLayout() {
     if (Platform.OS !== "web") setIsMenuOpen(false);
   };
 
+  // Verifica se estamos na tela de login para esconder a interface principal
+  const isLoginPage = segments[0] === "login";
+
+  if (isLoginPage) {
+    return <Slot />; // Renderiza só o card de login limpo
+  }
+
+  // Tela de loading simples enquanto o Firebase decide se o usuário está logado ou não
+  if (isLoading) {
+    return (
+      <View
+        style={[
+          styles.container,
+          { justifyContent: "center", alignItems: "center" },
+        ]}
+      >
+        <Text style={{ color: isDarkMode ? "#FFF" : "#333" }}>
+          Verificando credenciais...
+        </Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
-      {!isMenuOpen && (
+      {isMenuOpen && (
         <View style={styles.sidebar}>
           <TouchableOpacity
             style={styles.newChatButton}
@@ -98,7 +143,6 @@ function MainLayout() {
             <Text style={styles.headerTitle}>Tutor Socrático</Text>
           </View>
 
-          {/* Botão de Alternância de Tema */}
           <TouchableOpacity onPress={toggleTheme} style={styles.themeButton}>
             <Text style={styles.themeIcon}>{isDarkMode ? "☀️" : "🌙"}</Text>
           </TouchableOpacity>
@@ -109,17 +153,19 @@ function MainLayout() {
   );
 }
 
+// O RootLayout agora abraça a aplicação com as regras de Autenticação primeiro
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <ChatProvider>
-        <MainLayout />
-      </ChatProvider>
+      <AuthProvider>
+        <ChatProvider>
+          <MainLayout />
+        </ChatProvider>
+      </AuthProvider>
     </GestureHandlerRootView>
   );
 }
 
-// Estilos agora reagem à variável isDarkMode
 const getLayoutStyles = (isDarkMode: boolean) =>
   StyleSheet.create({
     container: {

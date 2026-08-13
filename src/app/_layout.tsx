@@ -1,6 +1,12 @@
 import { MaterialCommunityIcons as Icon } from "@expo/vector-icons";
 import { Slot, useRouter, useSegments } from "expo-router";
-import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
+import {
+  collection,
+  onSnapshot,
+  orderBy,
+  query,
+  where,
+} from "firebase/firestore";
 import { useEffect, useState } from "react";
 import {
   FlatList,
@@ -42,14 +48,16 @@ function MainLayout() {
     }
   }, [user, isLoading, segments]);
 
-  // Histórico de conversas
+  // Histórico de conversas (Filtrado apenas para o utilizador logado)
   useEffect(() => {
     if (!user) return;
 
     const q = query(
       collection(db, "conversations"),
+      where("alunoId", "==", user.uid), // <--- FILTRO POR UTILIZADOR
       orderBy("ultimaInteracao", "desc"),
     );
+
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const sessions = snapshot.docs.map((doc) => ({
         id: doc.id,

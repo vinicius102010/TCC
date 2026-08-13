@@ -1,7 +1,9 @@
 import { MaterialCommunityIcons as Icon } from "@expo/vector-icons";
 import {
   createUserWithEmailAndPassword,
+  GoogleAuthProvider,
   signInWithEmailAndPassword,
+  signInWithPopup,
 } from "firebase/auth";
 import { useState } from "react";
 import {
@@ -71,8 +73,20 @@ export default function LoginScreen() {
     setConfirmPassword(""); // Limpa a confirmação de senha por segurança
   };
 
-  const handleGoogleLogin = () => {
-    console.log("Tentando logar com Google");
+  const handleGoogleLogin = async () => {
+    try {
+      const provider = new GoogleAuthProvider();
+      // Abre a janela popup do Google para seleção de conta
+      await signInWithPopup(auth, provider);
+      // Assim que o login é concluído, o AuthContext deteta o novo estado
+      // e o _layout.tsx redireciona automaticamente para a tela do Chat.
+    } catch (error: any) {
+      console.error(error);
+      Alert.alert(
+        "Erro no login com o Google",
+        "Não foi possível autenticar com a conta Google. Tente novamente.",
+      );
+    }
   };
 
   return (

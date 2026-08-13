@@ -1,6 +1,11 @@
-import Icon from "@expo/vector-icons/MaterialCommunityIcons";
+import { MaterialCommunityIcons as Icon } from "@expo/vector-icons";
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+} from "firebase/auth";
 import { useState } from "react";
 import {
+  Alert,
   KeyboardAvoidingView,
   Platform,
   StyleSheet,
@@ -9,18 +14,61 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { auth } from "../config/firebase";
 import { useChat } from "../context/ChatContext";
 
 export default function LoginScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false); // Estado para controlar a visibilidade da senha
+  const [confirmPassword, setConfirmPassword] = useState(""); // Novo estado para confirmação
+  const [showPassword, setShowPassword] = useState(false);
+
+  const [isCreatingAccount, setIsCreatingAccount] = useState(false);
 
   const { isDarkMode } = useChat();
   const styles = getLoginStyles(isDarkMode);
 
-  const handleEmailLogin = () => {
-    console.log("Tentando logar com:", email, password);
+  const handleEmailAuth = async () => {
+    if (!email || !password) {
+      Alert.alert("Atenção", "Por favor, preencha o e-mail e a senha.");
+      return;
+    }
+
+    if (isCreatingAccount) {
+      if (password !== confirmPassword) {
+        Alert.alert("Atenção", "As senhas não coincidem. Digite novamente.");
+        return;
+      }
+
+      try {
+        await createUserWithEmailAndPassword(auth, email, password);
+      } catch (error: any) {
+        console.error(error);
+        Alert.alert(
+          "Erro ao criar conta",
+          "Verifique os dados, se a senha tem no mínimo 6 caracteres, ou se o e-mail já está em uso.",
+        );
+      }
+    } else {
+      // FLUXO DE LOGIN ATUALIZADO
+      try {
+        await signInWithEmailAndPassword(auth, email, password);
+        // Se a senha estiver correta, o Firebase atualiza o estado e
+        // o nosso AuthContext joga o usuário automaticamente para o Chat!
+      } catch (error: any) {
+        console.error(error);
+        Alert.alert(
+          "Erro ao entrar",
+          "E-mail ou senha incorretos. Verifique seus dados e tente novamente.",
+        );
+      }
+    }
+  };
+
+  // Função para limpar os campos ao alternar entre Login e Cadastro
+  const toggleMode = () => {
+    setIsCreatingAccount(!isCreatingAccount);
+    setConfirmPassword(""); // Limpa a confirmação de senha por segurança
   };
 
   const handleGoogleLogin = () => {
@@ -34,7 +82,11 @@ export default function LoginScreen() {
     >
       <View style={styles.card}>
         <Text style={styles.title}>Tutor Socrático</Text>
-        <Text style={styles.subtitle}>Acesse sua conta para continuar</Text>
+        <Text style={styles.subtitle}>
+          {isCreatingAccount
+            ? "Crie sua conta para começar"
+            : "Acesse sua conta para continuar"}
+        </Text>
 
         <TextInput
           style={styles.input}
@@ -46,7 +98,6 @@ export default function LoginScreen() {
           autoCapitalize="none"
         />
 
-        {/* Container do Input de Senha + Ícone */}
         <View style={styles.passwordContainer}>
           <TextInput
             style={styles.passwordInput}
@@ -54,25 +105,49 @@ export default function LoginScreen() {
             placeholderTextColor={isDarkMode ? "#888" : "#aaa"}
             value={password}
             onChangeText={setPassword}
-            secureTextEntry={!showPassword} // Inverte a visibilidade baseado no estado
+            secureTextEntry={!showPassword}
           />
           <TouchableOpacity
             style={styles.eyeIcon}
             onPress={() => setShowPassword(!showPassword)}
           >
             <Icon
-              name={showPassword ? "eye-off" : "eye"} // Troca o ícone dinamicamente
+              name={showPassword ? "eye-off" : "eye"}
               size={24}
               color={isDarkMode ? "#888" : "#aaa"}
             />
           </TouchableOpacity>
         </View>
 
+        {/* CAMPO CONDICIONAL: Só renderiza se estiver criando conta */}
+        {isCreatingAccount && (
+          <View style={styles.passwordContainer}>
+            <TextInput
+              style={styles.passwordInput}
+              placeholder="Confirme sua senha"
+              placeholderTextColor={isDarkMode ? "#888" : "#aaa"}
+              value={confirmPassword}
+              onChangeText={setConfirmPassword}
+              secureTextEntry={!showPassword}
+            />
+          </View>
+        )}
+
         <TouchableOpacity
           style={styles.primaryButton}
-          onPress={handleEmailLogin}
+          onPress={handleEmailAuth}
         >
-          <Text style={styles.primaryButtonText}>Entrar</Text>
+          <Text style={styles.primaryButtonText}>
+            {isCreatingAccount ? "Cadastrar" : "Entrar"}
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.switchModeButton} onPress={toggleMode}>
+          <Text style={styles.switchModeText}>
+            {isCreatingAccount
+              ? "Já tem uma conta? Clique aqui para entrar."
+              : "Não tem uma conta? Crie uma aqui."}
+          </Text>
         </TouchableOpacity>
 
         <View style={styles.dividerContainer}>
@@ -88,7 +163,7 @@ export default function LoginScreen() {
           <Icon
             name="google"
             size={20}
-            color={isDarkMode ? "#FFF" : "#db4a39"} // Vermelho Google no modo claro, branco no escuro
+            color={isDarkMode ? "#FFF" : "#db4a39"}
             style={styles.googleIcon}
           />
           <Text style={styles.googleButtonText}>Continuar com o Google</Text>
@@ -98,6 +173,7 @@ export default function LoginScreen() {
   );
 }
 
+// Os estilos continuam os mesmos
 const getLoginStyles = (isDarkMode: boolean) =>
   StyleSheet.create({
     container: {
@@ -158,21 +234,17 @@ const getLoginStyles = (isDarkMode: boolean) =>
       paddingVertical: 14,
       fontSize: 16,
     },
-    eyeIcon: {
-      padding: 12,
-    },
+    eyeIcon: { padding: 12 },
     primaryButton: {
       backgroundColor: "#0056b3",
       paddingVertical: 14,
       borderRadius: 8,
       alignItems: "center",
-      marginBottom: 20,
+      marginBottom: 16,
     },
-    primaryButtonText: {
-      color: "#FFFFFF",
-      fontWeight: "bold",
-      fontSize: 16,
-    },
+    primaryButtonText: { color: "#FFFFFF", fontWeight: "bold", fontSize: 16 },
+    switchModeButton: { alignItems: "center", marginBottom: 24 },
+    switchModeText: { color: "#0056b3", fontWeight: "600", fontSize: 14 },
     dividerContainer: {
       flexDirection: "row",
       alignItems: "center",
@@ -189,7 +261,7 @@ const getLoginStyles = (isDarkMode: boolean) =>
       fontWeight: "bold",
     },
     googleButton: {
-      flexDirection: "row", // Alinha o ícone e o texto horizontalmente
+      flexDirection: "row",
       backgroundColor: isDarkMode ? "#272753" : "#FFFFFF",
       borderWidth: isDarkMode ? 0 : 1,
       borderColor: "#E0E0E0",
@@ -198,9 +270,7 @@ const getLoginStyles = (isDarkMode: boolean) =>
       alignItems: "center",
       justifyContent: "center",
     },
-    googleIcon: {
-      marginRight: 10,
-    },
+    googleIcon: { marginRight: 10 },
     googleButtonText: {
       color: isDarkMode ? "#FFFFFF" : "#333333",
       fontWeight: "bold",

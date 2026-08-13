@@ -38,7 +38,8 @@ export default function ChatScreen() {
   const { user } = useAuth(); // Puxamos o utilizador logado
 
   const styles = getChatStyles(isDarkMode);
-
+  // Pega apenas o primeiro nome para uma saudação mais informal
+  const firstName = user?.displayName ? user.displayName.split(" ")[0] : "";
   useEffect(() => {
     if (!activeSessionId) {
       setMessages([]);
@@ -141,7 +142,8 @@ export default function ChatScreen() {
       {!activeSessionId && messages.length === 0 && (
         <View style={styles.emptyStateContainer}>
           <Text style={styles.emptyStateTitle}>
-            Olá! Como posso te guiar hoje?
+            {firstName ? `Olá, ${firstName}! ` : "Olá! "}Como posso te guiar
+            hoje?
           </Text>
         </View>
       )}

@@ -1,36 +1,49 @@
-import { MaterialCommunityIcons as Icon } from "@expo/vector-icons";
+import React, { useState } from "react";
 import {
-  createUserWithEmailAndPassword,
-  GoogleAuthProvider,
-  signInWithEmailAndPassword,
-  signInWithPopup,
-} from "firebase/auth";
-import { useState } from "react";
-import {
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  StyleSheet,
+  View,
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  StyleSheet,
+  KeyboardAvoidingView,
+  Platform,
+  Alert,
 } from "react-native";
+import { MaterialCommunityIcons as Icon } from "@expo/vector-icons";
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  GoogleAuthProvider,
+  signInWithPopup,
+  sendPasswordResetEmail,
+  updateProfile,
+} from "firebase/auth";
 import { auth } from "../config/firebase";
 import { useChat } from "../context/ChatContext";
 
 export default function LoginScreen() {
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState(""); // Novo estado para confirmação
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
 
+  // Nossos estados de navegação da tela
   const [isCreatingAccount, setIsCreatingAccount] = useState(false);
+  const [isForgotPassword, setIsForgotPassword] = useState(false); // NOVO ESTADO
 
   const { isDarkMode } = useChat();
   const styles = getLoginStyles(isDarkMode);
 
   const handleEmailAuth = async () => {
+    if (isCreatingAccount && !name.trim()) {
+      Alert.alert(
+        "Atenção",
+        "Por favor, informe como você gostaria de ser chamado.",
+      );
+      return;
+    }
+
     if (!email || !password) {
       Alert.alert("Atenção", "Por favor, preencha o e-mail e a senha.");
       return;
@@ -43,7 +56,12 @@ export default function LoginScreen() {
       }
 
       try {
-        await createUserWithEmailAndPassword(auth, email, password);
+        const userCredential = await createUserWithEmailAndPassword(
+          auth,
+          email,
+          password,
+        );
+        await updateProfile(userCredential.user, { displayName: name });
       } catch (error: any) {
         console.error(error);
         Alert.alert(
@@ -52,11 +70,8 @@ export default function LoginScreen() {
         );
       }
     } else {
-      // FLUXO DE LOGIN ATUALIZADO
       try {
         await signInWithEmailAndPassword(auth, email, password);
-        // Se a senha estiver correta, o Firebase atualiza o estado e
-        // o nosso AuthContext joga o usuário automaticamente para o Chat!
       } catch (error: any) {
         console.error(error);
         Alert.alert(
@@ -67,19 +82,41 @@ export default function LoginScreen() {
     }
   };
 
-  // Função para limpar os campos ao alternar entre Login e Cadastro
+  const handleForgotPassword = async () => {
+    if (!email.trim()) {
+      Alert.alert(
+        "Atenção",
+        "Por favor, digite seu e-mail para receber o link.",
+      );
+      return;
+    }
+
+    try {
+      await sendPasswordResetEmail(auth, email);
+      Alert.alert(
+        "E-mail enviado!",
+        "Verifique sua caixa de entrada (e a pasta de spam) para redefinir sua senha.",
+      );
+      setIsForgotPassword(false); // Volta para a tela de login após enviar com sucesso
+    } catch (error: any) {
+      console.error(error);
+      Alert.alert(
+        "Erro",
+        "Não foi possível enviar o e-mail. Verifique se o endereço está correto.",
+      );
+    }
+  };
+
   const toggleMode = () => {
     setIsCreatingAccount(!isCreatingAccount);
-    setConfirmPassword(""); // Limpa a confirmação de senha por segurança
+    setConfirmPassword("");
+    setName("");
   };
 
   const handleGoogleLogin = async () => {
     try {
       const provider = new GoogleAuthProvider();
-      // Abre a janela popup do Google para seleção de conta
       await signInWithPopup(auth, provider);
-      // Assim que o login é concluído, o AuthContext deteta o novo estado
-      // e o _layout.tsx redireciona automaticamente para a tela do Chat.
     } catch (error: any) {
       console.error(error);
       Alert.alert(
@@ -96,98 +133,176 @@ export default function LoginScreen() {
     >
       <View style={styles.card}>
         <Text style={styles.title}>Tutor Socrático</Text>
-        <Text style={styles.subtitle}>
-          {isCreatingAccount
-            ? "Crie sua conta para começar"
-            : "Acesse sua conta para continuar"}
-        </Text>
 
-        <TextInput
-          style={styles.input}
-          placeholder="Seu e-mail escolar ou pessoal"
-          placeholderTextColor={isDarkMode ? "#888" : "#aaa"}
-          value={email}
-          onChangeText={setEmail}
-          keyboardType="email-address"
-          autoCapitalize="none"
-        />
+        {/* ==========================================
+            FLUXO DE ESQUECI A SENHA
+            ========================================== */}
+        {isForgotPassword ? (
+          <>
+            <Text style={styles.subtitle}>
+              Digite seu e-mail escolar ou pessoal. Enviaremos um link para você
+              redefinir sua senha.
+            </Text>
 
-        <View style={styles.passwordContainer}>
-          <TextInput
-            style={styles.passwordInput}
-            placeholder="Sua senha"
-            placeholderTextColor={isDarkMode ? "#888" : "#aaa"}
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry={!showPassword}
-          />
-          <TouchableOpacity
-            style={styles.eyeIcon}
-            onPress={() => setShowPassword(!showPassword)}
-          >
-            <Icon
-              name={showPassword ? "eye-off" : "eye"}
-              size={24}
-              color={isDarkMode ? "#888" : "#aaa"}
-            />
-          </TouchableOpacity>
-        </View>
-
-        {/* CAMPO CONDICIONAL: Só renderiza se estiver criando conta */}
-        {isCreatingAccount && (
-          <View style={styles.passwordContainer}>
             <TextInput
-              style={styles.passwordInput}
-              placeholder="Confirme sua senha"
+              style={styles.input}
+              placeholder="Seu e-mail"
               placeholderTextColor={isDarkMode ? "#888" : "#aaa"}
-              value={confirmPassword}
-              onChangeText={setConfirmPassword}
-              secureTextEntry={!showPassword}
+              value={email}
+              onChangeText={setEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
             />
-          </View>
+
+            <TouchableOpacity
+              style={styles.primaryButton}
+              onPress={handleForgotPassword}
+            >
+              <Text style={styles.primaryButtonText}>
+                Enviar Link de Recuperação
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.switchModeButton}
+              onPress={() => setIsForgotPassword(false)}
+            >
+              <Text style={styles.switchModeText}>Voltar para o Login</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          /* ==========================================
+             FLUXO DE LOGIN / CADASTRO
+             ========================================== */
+          <>
+            <Text style={styles.subtitle}>
+              {isCreatingAccount
+                ? "Crie sua conta para começar"
+                : "Acesse sua conta para continuar"}
+            </Text>
+
+            {isCreatingAccount && (
+              <TextInput
+                style={styles.input}
+                placeholder="Seu nome completo ou apelido"
+                placeholderTextColor={isDarkMode ? "#888" : "#aaa"}
+                value={name}
+                onChangeText={setName}
+                autoCapitalize="words"
+              />
+            )}
+
+            <TextInput
+              style={styles.input}
+              placeholder="Seu e-mail escolar ou pessoal"
+              placeholderTextColor={isDarkMode ? "#888" : "#aaa"}
+              value={email}
+              onChangeText={setEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+            />
+
+            <View style={styles.passwordContainer}>
+              <TextInput
+                style={styles.passwordInput}
+                placeholder="Sua senha"
+                placeholderTextColor={isDarkMode ? "#888" : "#aaa"}
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry={!showPassword}
+                // Adicionamos o envio com o Enter aqui (só dispara se for login)
+                onSubmitEditing={
+                  isCreatingAccount ? undefined : handleEmailAuth
+                }
+                returnKeyType="done"
+              />
+              <TouchableOpacity
+                style={styles.eyeIcon}
+                onPress={() => setShowPassword(!showPassword)}
+              >
+                <Icon
+                  name={showPassword ? "eye-off" : "eye"}
+                  size={24}
+                  color={isDarkMode ? "#888" : "#aaa"}
+                />
+              </TouchableOpacity>
+            </View>
+
+            {isCreatingAccount && (
+              <View style={styles.passwordContainer}>
+                <TextInput
+                  style={styles.passwordInput}
+                  placeholder="Confirme sua senha"
+                  placeholderTextColor={isDarkMode ? "#888" : "#aaa"}
+                  value={confirmPassword}
+                  onChangeText={setConfirmPassword}
+                  secureTextEntry={!showPassword}
+                  // Adicionamos o envio com o Enter aqui (dispara na criação de conta)
+                  onSubmitEditing={handleEmailAuth}
+                  returnKeyType="done"
+                />
+              </View>
+            )}
+
+            {!isCreatingAccount && (
+              <TouchableOpacity
+                onPress={() => setIsForgotPassword(true)}
+                style={styles.forgotPasswordButton}
+              >
+                <Text style={styles.forgotPasswordText}>Esqueci a senha</Text>
+              </TouchableOpacity>
+            )}
+
+            <TouchableOpacity
+              style={[
+                styles.primaryButton,
+                { marginTop: isCreatingAccount ? 10 : 0 },
+              ]}
+              onPress={handleEmailAuth}
+            >
+              <Text style={styles.primaryButtonText}>
+                {isCreatingAccount ? "Cadastrar" : "Entrar"}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.switchModeButton}
+              onPress={toggleMode}
+            >
+              <Text style={styles.switchModeText}>
+                {isCreatingAccount
+                  ? "Já tem uma conta? Clique aqui para entrar."
+                  : "Não tem uma conta? Crie uma aqui."}
+              </Text>
+            </TouchableOpacity>
+
+            <View style={styles.dividerContainer}>
+              <View style={styles.divider} />
+              <Text style={styles.dividerText}>OU</Text>
+              <View style={styles.divider} />
+            </View>
+
+            <TouchableOpacity
+              style={styles.googleButton}
+              onPress={handleGoogleLogin}
+            >
+              <Icon
+                name="google"
+                size={20}
+                color={isDarkMode ? "#FFF" : "#db4a39"}
+                style={styles.googleIcon}
+              />
+              <Text style={styles.googleButtonText}>
+                Continuar com o Google
+              </Text>
+            </TouchableOpacity>
+          </>
         )}
-
-        <TouchableOpacity
-          style={styles.primaryButton}
-          onPress={handleEmailAuth}
-        >
-          <Text style={styles.primaryButtonText}>
-            {isCreatingAccount ? "Cadastrar" : "Entrar"}
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.switchModeButton} onPress={toggleMode}>
-          <Text style={styles.switchModeText}>
-            {isCreatingAccount
-              ? "Já tem uma conta? Clique aqui para entrar."
-              : "Não tem uma conta? Crie uma aqui."}
-          </Text>
-        </TouchableOpacity>
-
-        <View style={styles.dividerContainer}>
-          <View style={styles.divider} />
-          <Text style={styles.dividerText}>OU</Text>
-          <View style={styles.divider} />
-        </View>
-
-        <TouchableOpacity
-          style={styles.googleButton}
-          onPress={handleGoogleLogin}
-        >
-          <Icon
-            name="google"
-            size={20}
-            color={isDarkMode ? "#FFF" : "#db4a39"}
-            style={styles.googleIcon}
-          />
-          <Text style={styles.googleButtonText}>Continuar com o Google</Text>
-        </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
   );
 }
 
-// Os estilos continuam os mesmos
 const getLoginStyles = (isDarkMode: boolean) =>
   StyleSheet.create({
     container: {
@@ -220,6 +335,7 @@ const getLoginStyles = (isDarkMode: boolean) =>
       color: isDarkMode ? "#888" : "#666",
       textAlign: "center",
       marginBottom: 24,
+      lineHeight: 20,
     },
     input: {
       backgroundColor: isDarkMode ? "#121212" : "#F0F2F5",
@@ -249,6 +365,12 @@ const getLoginStyles = (isDarkMode: boolean) =>
       fontSize: 16,
     },
     eyeIcon: { padding: 12 },
+    forgotPasswordButton: { alignSelf: "flex-end", marginBottom: 20 },
+    forgotPasswordText: {
+      color: isDarkMode ? "#82B1FF" : "#0056b3",
+      fontWeight: "600",
+      fontSize: 14,
+    },
     primaryButton: {
       backgroundColor: "#0056b3",
       paddingVertical: 14,
@@ -258,7 +380,11 @@ const getLoginStyles = (isDarkMode: boolean) =>
     },
     primaryButtonText: { color: "#FFFFFF", fontWeight: "bold", fontSize: 16 },
     switchModeButton: { alignItems: "center", marginBottom: 24 },
-    switchModeText: { color: "#0056b3", fontWeight: "600", fontSize: 14 },
+    switchModeText: {
+      color: isDarkMode ? "#82B1FF" : "#0056b3",
+      fontWeight: "600",
+      fontSize: 14,
+    },
     dividerContainer: {
       flexDirection: "row",
       alignItems: "center",

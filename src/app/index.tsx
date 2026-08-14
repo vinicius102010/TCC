@@ -20,6 +20,7 @@ import {
   View,
 } from "react-native";
 import { db } from "../config/firebase";
+import { useAuth } from "../context/AuthContext"; // Importamos o AuthContext
 import { useChat } from "../context/ChatContext";
 
 type Message = {
@@ -33,12 +34,13 @@ export default function ChatScreen() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState("");
 
-  // Puxa as variáveis do Contexto que acabamos de criar
   const { activeSessionId, setActiveSessionId, isDarkMode } = useChat();
-  const styles = getChatStyles(isDarkMode);
+  const { user } = useAuth(); // Puxamos o utilizador logado
 
+  const styles = getChatStyles(isDarkMode);
+  // Pega apenas o primeiro nome para uma saudação mais informal
+  const firstName = user?.displayName ? user.displayName.split(" ")[0] : "";
   useEffect(() => {
-    // Se clicou em "Nova Conversa" (null), limpa a tela de mensagens
     if (!activeSessionId) {
       setMessages([]);
       return;
@@ -65,29 +67,25 @@ export default function ChatScreen() {
   }, [activeSessionId]);
 
   const sendMessage = async () => {
-    if (inputText.trim() === "") return;
+    if (inputText.trim() === "" || !user) return;
 
     const textToSend = inputText;
     setInputText("");
 
     let currentSessionId = activeSessionId;
 
-    // Se for a PRIMEIRA mensagem de uma nova conversa
     if (!currentSessionId) {
-      // Gera um ID novo aleatório para a coleção principal
       const newSessionRef = doc(collection(db, "conversations"));
       currentSessionId = newSessionRef.id;
 
-      // Atualiza o documento pai com dados de telemetria
+      // Salva a conversa associada ao UID do utilizador logado
       await setDoc(newSessionRef, {
-        alunoId: "aluno-anonimo",
+        alunoId: user.uid,
         ultimaInteracao: serverTimestamp(),
       });
 
-      // Avisa o resto do aplicativo qual é a sessão atual
       setActiveSessionId(currentSessionId);
     } else {
-      // Se já existe a conversa, apenas atualiza o "visto por último" para subir no histórico
       const sessionDocRef = doc(db, "conversations", currentSessionId);
       await setDoc(
         sessionDocRef,
@@ -141,11 +139,11 @@ export default function ChatScreen() {
       style={styles.container}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
-      {/* Mensagem de boas vindas caso seja uma tela de "Nova Conversa" vazia */}
       {!activeSessionId && messages.length === 0 && (
         <View style={styles.emptyStateContainer}>
           <Text style={styles.emptyStateTitle}>
-            Olá! Como posso te guiar hoje?
+            {firstName ? `Olá, ${firstName}! ` : "Olá! "}Como posso te guiar
+            hoje?
           </Text>
         </View>
       )}
@@ -161,6 +159,7 @@ export default function ChatScreen() {
         <TextInput
           style={styles.input}
           placeholder="Digite sua dúvida..."
+          placeholderTextColor={isDarkMode ? "#888" : "#aaa"}
           value={inputText}
           onChangeText={setInputText}
           onSubmitEditing={sendMessage}

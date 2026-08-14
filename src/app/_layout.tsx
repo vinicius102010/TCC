@@ -1,5 +1,12 @@
-import { Slot } from "expo-router";
-import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
+import { MaterialCommunityIcons as Icon } from "@expo/vector-icons";
+import { Slot, useRouter, useSegments } from "expo-router";
+import {
+  collection,
+  onSnapshot,
+  orderBy,
+  query,
+  where,
+} from "firebase/firestore";
 import { useEffect, useState } from "react";
 import {
   FlatList,
@@ -11,24 +18,46 @@ import {
 } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { db } from "../config/firebase";
+import { AuthProvider, useAuth } from "../context/AuthContext";
 import { ChatProvider, useChat } from "../context/ChatContext";
 
 function MainLayout() {
   const [isMenuOpen, setIsMenuOpen] = useState(Platform.OS === "web");
   const [conversations, setConversations] = useState<any[]>([]);
 
-  // Puxamos também as funções de tema do contexto
   const { activeSessionId, setActiveSessionId, isDarkMode, toggleTheme } =
     useChat();
 
-  // Passamos o estado atual para gerar as cores corretas
+  // Puxamos a função de logout do AuthContext
+  const { user, isLoading, logout } = useAuth();
+  const segments = useSegments();
+  const router = useRouter();
+
   const styles = getLayoutStyles(isDarkMode);
 
+  // PROTEÇÃO DE ROTAS
   useEffect(() => {
+    if (isLoading) return;
+
+    const isLoginPage = segments[0] === "login";
+
+    if (!user && !isLoginPage) {
+      router.replace("/login");
+    } else if (user && isLoginPage) {
+      router.replace("/");
+    }
+  }, [user, isLoading, segments]);
+
+  // Histórico de conversas (Filtrado apenas para o utilizador logado)
+  useEffect(() => {
+    if (!user) return;
+
     const q = query(
       collection(db, "conversations"),
+      where("alunoId", "==", user.uid), // <--- FILTRO POR UTILIZADOR
       orderBy("ultimaInteracao", "desc"),
     );
+
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const sessions = snapshot.docs.map((doc) => ({
         id: doc.id,
@@ -37,7 +66,7 @@ function MainLayout() {
       setConversations(sessions);
     });
     return () => unsubscribe();
-  }, []);
+  }, [user]);
 
   const handleNewChat = () => {
     setActiveSessionId(null);
@@ -49,9 +78,30 @@ function MainLayout() {
     if (Platform.OS !== "web") setIsMenuOpen(false);
   };
 
+  const isLoginPage = segments[0] === "login";
+
+  if (isLoginPage) {
+    return <Slot />;
+  }
+
+  if (isLoading) {
+    return (
+      <View
+        style={[
+          styles.container,
+          { justifyContent: "center", alignItems: "center" },
+        ]}
+      >
+        <Text style={{ color: isDarkMode ? "#FFF" : "#333" }}>
+          Verificando credenciais...
+        </Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
-      {!isMenuOpen && (
+      {isMenuOpen && (
         <View style={styles.sidebar}>
           <TouchableOpacity
             style={styles.newChatButton}
@@ -83,6 +133,17 @@ function MainLayout() {
               </Text>
             }
           />
+
+          {/* BOTÃO DE SAIR NO RODAPÉ DO MENU */}
+          <TouchableOpacity style={styles.logoutButton} onPress={logout}>
+            <Icon
+              name="logout"
+              size={20}
+              color="#FF4D4D"
+              style={{ marginRight: 8 }}
+            />
+            <Text style={styles.logoutButtonText}>Sair da Conta</Text>
+          </TouchableOpacity>
         </View>
       )}
 
@@ -98,7 +159,6 @@ function MainLayout() {
             <Text style={styles.headerTitle}>Tutor Socrático</Text>
           </View>
 
-          {/* Botão de Alternância de Tema */}
           <TouchableOpacity onPress={toggleTheme} style={styles.themeButton}>
             <Text style={styles.themeIcon}>{isDarkMode ? "☀️" : "🌙"}</Text>
           </TouchableOpacity>
@@ -112,14 +172,15 @@ function MainLayout() {
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <ChatProvider>
-        <MainLayout />
-      </ChatProvider>
+      <AuthProvider>
+        <ChatProvider>
+          <MainLayout />
+        </ChatProvider>
+      </AuthProvider>
     </GestureHandlerRootView>
   );
 }
 
-// Estilos agora reagem à variável isDarkMode
 const getLayoutStyles = (isDarkMode: boolean) =>
   StyleSheet.create({
     container: {
@@ -133,6 +194,7 @@ const getLayoutStyles = (isDarkMode: boolean) =>
       padding: 16,
       borderRightWidth: 1,
       borderColor: isDarkMode ? "#333" : "#004494",
+      justifyContent: "space-between",
     },
     newChatButton: {
       backgroundColor: "#272753",
@@ -158,6 +220,16 @@ const getLayoutStyles = (isDarkMode: boolean) =>
       textAlign: "center",
       marginTop: 20,
     },
+    logoutButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      padding: 12,
+      borderRadius: 8,
+      marginTop: 10,
+      borderTopWidth: 1,
+      borderColor: isDarkMode ? "#333" : "#004494",
+    },
+    logoutButtonText: { color: "#FF4D4D", fontWeight: "bold", fontSize: 14 },
     mainContent: { flex: 1, flexDirection: "column" },
     header: {
       flexDirection: "row",

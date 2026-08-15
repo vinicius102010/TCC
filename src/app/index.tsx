@@ -22,6 +22,7 @@ import {
 import { db } from "../config/firebase";
 import { useAuth } from "../context/AuthContext"; // Importamos o AuthContext
 import { useChat } from "../context/ChatContext";
+import { getTutorResponse } from '../services/aiService';
 
 type Message = {
   id: string;
@@ -81,6 +82,7 @@ export default function ChatScreen() {
       // Salva a conversa associada ao UID do utilizador logado
       await setDoc(newSessionRef, {
         alunoId: user.uid,
+        alunoNome:user.displayName ||'Aluno',
         ultimaInteracao: serverTimestamp(),
       });
 
@@ -101,19 +103,23 @@ export default function ChatScreen() {
       "messages",
     );
 
-    await addDoc(messagesRef, {
-      text: textToSend,
-      sender: "user",
-      createdAt: serverTimestamp(),
-    });
+    // Salva a mensagem do usuário no banco
+        await addDoc(messagesRef, {
+          text: textToSend,
+          sender: 'user',
+          createdAt: serverTimestamp()
+        });
 
-    setTimeout(async () => {
-      await addDoc(messagesRef, {
-        text: "Analisando a sua dúvida de forma estruturada...",
-        sender: "ai",
-        createdAt: serverTimestamp(),
-      });
-    }, 1000);
+        // CHAMA A INTELIGÊNCIA ARTIFICIAL
+        // Passamos o histórico atual da tela e a nova mensagem digitada
+        const aiResponseText = await getTutorResponse(messages, textToSend);
+
+        // Salva a resposta da IA no banco
+        await addDoc(messagesRef, {
+          text: aiResponseText,
+          sender: 'ai',
+          createdAt: serverTimestamp()
+        });
   };
 
   const renderMessage = ({ item }: { item: Message }) => {

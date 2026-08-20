@@ -1,6 +1,3 @@
-// src/services/aiService.ts
-
-// Veja como o arquivo ficou limpo! Nada de chaves ou bibliotecas do Google aqui.
 export const getTutorResponse = async (
   chatHistory: any[],
   newMessage: string,

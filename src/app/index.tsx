@@ -1,3 +1,5 @@
+import { MaterialCommunityIcons as Icon } from "@expo/vector-icons";
+import * as ImagePicker from "expo-image-picker";
 import {
   addDoc,
   collection,
@@ -11,6 +13,7 @@ import {
 import { useEffect, useState } from "react";
 import {
   FlatList,
+  Image,
   KeyboardAvoidingView,
   Platform,
   StyleSheet,
@@ -19,28 +22,31 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+
 import { db } from "../config/firebase";
-import { useAuth } from "../context/AuthContext"; // Importamos o AuthContext
+import { useAuth } from "../context/AuthContext";
 import { useChat } from "../context/ChatContext";
-import { getTutorResponse } from '../services/aiService';
+import { getTutorResponse } from "../services/aiService";
 
 type Message = {
   id: string;
   text: string;
   sender: "user" | "ai";
+  imageUrl?: string; // Suporte para salvar o link/URI da imagem
   createdAt?: any;
 };
 
 export default function ChatScreen() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState("");
+  const [selectedImage, setSelectedImage] = useState<string | null>(null); // Estado da imagem anexada
 
   const { activeSessionId, setActiveSessionId, isDarkMode } = useChat();
-  const { user } = useAuth(); // Puxamos o utilizador logado
+  const { user } = useAuth();
 
-  const styles = getChatStyles(isDarkMode);
-  // Pega apenas o primeiro nome para uma saudação mais informal
   const firstName = user?.displayName ? user.displayName.split(" ")[0] : "";
+  const styles = getChatStyles(isDarkMode);
+
   useEffect(() => {
     if (!activeSessionId) {
       setMessages([]);
@@ -67,11 +73,28 @@ export default function ChatScreen() {
     return () => unsubscribe();
   }, [activeSessionId]);
 
+  // Função para abrir a galeria de fotos
+  const pickImage = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      allowsEditing: true,
+      quality: 0.8,
+    });
+
+    if (!result.canceled && result.assets[0].uri) {
+      setSelectedImage(result.assets[0].uri);
+    }
+  };
+
   const sendMessage = async () => {
-    if (inputText.trim() === "" || !user) return;
+    if ((inputText.trim() === "" && !selectedImage) || !user) return;
 
     const textToSend = inputText;
+    const imageToSend = selectedImage;
+
+    // Limpa a interface imediatamente para o usuário
     setInputText("");
+    setSelectedImage(null);
 
     let currentSessionId = activeSessionId;
 
@@ -79,10 +102,9 @@ export default function ChatScreen() {
       const newSessionRef = doc(collection(db, "conversations"));
       currentSessionId = newSessionRef.id;
 
-      // Salva a conversa associada ao UID do utilizador logado
       await setDoc(newSessionRef, {
         alunoId: user.uid,
-        alunoNome:user.displayName ||'Aluno',
+        alunoNome: user.displayName || "Aluno",
         ultimaInteracao: serverTimestamp(),
       });
 
@@ -103,23 +125,27 @@ export default function ChatScreen() {
       "messages",
     );
 
-    // Salva a mensagem do usuário no banco
-        await addDoc(messagesRef, {
-          text: textToSend,
-          sender: 'user',
-          createdAt: serverTimestamp()
-        });
+    // 1. Salva a mensagem do aluno (com texto e/ou foto)
+    await addDoc(messagesRef, {
+      text: textToSend,
+      imageUrl: imageToSend || null,
+      sender: "user",
+      createdAt: serverTimestamp(),
+    });
 
-        // CHAMA A INTELIGÊNCIA ARTIFICIAL
-        // Passamos o histórico atual da tela e a nova mensagem digitada
-        const aiResponseText = await getTutorResponse(messages, textToSend);
+    // 2. Busca a resposta da IA
+    const promptWithContext = imageToSend
+      ? `[O aluno enviou uma imagem/exercício em anexo] ${textToSend}`
+      : textToSend;
 
-        // Salva a resposta da IA no banco
-        await addDoc(messagesRef, {
-          text: aiResponseText,
-          sender: 'ai',
-          createdAt: serverTimestamp()
-        });
+    const aiResponseText = await getTutorResponse(messages, promptWithContext);
+
+    // 3. Salva a resposta da IA
+    await addDoc(messagesRef, {
+      text: aiResponseText,
+      sender: "ai",
+      createdAt: serverTimestamp(),
+    });
   };
 
   const renderMessage = ({ item }: { item: Message }) => {
@@ -131,11 +157,19 @@ export default function ChatScreen() {
           isUser ? styles.userBubble : styles.aiBubble,
         ]}
       >
-        <Text
-          style={[styles.messageText, isUser ? styles.userText : styles.aiText]}
-        >
-          {item.text}
-        </Text>
+        {item.imageUrl && (
+          <Image source={{ uri: item.imageUrl }} style={styles.messageImage} />
+        )}
+        {item.text !== "" && (
+          <Text
+            style={[
+              styles.messageText,
+              isUser ? styles.userText : styles.aiText,
+            ]}
+          >
+            {item.text}
+          </Text>
+        )}
       </View>
     );
   };
@@ -161,10 +195,32 @@ export default function ChatScreen() {
         contentContainerStyle={styles.messageList}
       />
 
+      {/* Pré-visualização da Imagem selecionada antes de enviar */}
+      {selectedImage && (
+        <View style={styles.previewContainer}>
+          <Image source={{ uri: selectedImage }} style={styles.previewImage} />
+          <TouchableOpacity
+            style={styles.removeImageButton}
+            onPress={() => setSelectedImage(null)}
+          >
+            <Icon name="close-circle" size={24} color="#FF4D4D" />
+          </TouchableOpacity>
+        </View>
+      )}
+
       <View style={styles.inputContainer}>
+        {/* Botão de Anexo/Clipe */}
+        <TouchableOpacity style={styles.attachButton} onPress={pickImage}>
+          <Icon
+            name="paperclip"
+            size={22}
+            color={isDarkMode ? "#888" : "#666"}
+          />
+        </TouchableOpacity>
+
         <TextInput
           style={styles.input}
-          placeholder="Digite sua dúvida..."
+          placeholder="Digite sua dúvida ou anexe uma foto..."
           placeholderTextColor={isDarkMode ? "#888" : "#aaa"}
           value={inputText}
           onChangeText={setInputText}
@@ -188,7 +244,7 @@ const getChatStyles = (isDarkMode: boolean) =>
     },
     emptyStateTitle: {
       fontSize: 20,
-      color: isDarkMode ? "#666" : "#0056b3",
+      color: isDarkMode ? "#82B1FF" : "#0056b3",
       fontWeight: "bold",
     },
     messageList: { padding: 16, paddingBottom: 20, flexGrow: 1 },
@@ -213,6 +269,25 @@ const getChatStyles = (isDarkMode: boolean) =>
     messageText: { fontSize: 16, lineHeight: 22 },
     userText: { color: "#FFFFFF" },
     aiText: { color: isDarkMode ? "#E0E0E0" : "#333333" },
+    messageImage: {
+      width: 200,
+      height: 200,
+      borderRadius: 12,
+      marginBottom: 8,
+    },
+
+    // Painel de Pré-visualização da Foto
+    previewContainer: {
+      flexDirection: "row",
+      alignItems: "center",
+      padding: 8,
+      backgroundColor: isDarkMode ? "#1E1E2D" : "#FFF",
+      borderTopWidth: 1,
+      borderColor: isDarkMode ? "#333" : "#E0E0E0",
+    },
+    previewImage: { width: 60, height: 60, borderRadius: 8, marginRight: 8 },
+    removeImageButton: { padding: 4 },
+
     inputContainer: {
       flexDirection: "row",
       padding: 12,
@@ -221,6 +296,7 @@ const getChatStyles = (isDarkMode: boolean) =>
       borderColor: isDarkMode ? "#333" : "#E0E0E0",
       alignItems: "center",
     },
+    attachButton: { paddingRight: 10, paddingLeft: 4 },
     input: {
       flex: 1,
       backgroundColor: isDarkMode ? "#121212" : "#F0F2F5",

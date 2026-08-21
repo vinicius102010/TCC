@@ -10,11 +10,12 @@ import {
   serverTimestamp,
   setDoc,
 } from "firebase/firestore";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   FlatList,
   Image,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   StyleSheet,
   Text,
@@ -32,21 +33,29 @@ type Message = {
   id: string;
   text: string;
   sender: "user" | "ai";
-  imageUrl?: string; // Suporte para salvar o link/URI da imagem
+  imageUrl?: string;
   createdAt?: any;
 };
 
 export default function ChatScreen() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState("");
-  const [selectedImage, setSelectedImage] = useState<string | null>(null); // Estado da imagem anexada
+
+  // Estados da Imagem
+  const [selectedImage, setSelectedImage] = useState<string | null>(null); // URI para mostrar na tela
+  const [selectedImageBase64, setSelectedImageBase64] = useState<string | null>(
+    null,
+  ); // Dados reais para a IA
+  const [viewingImageUrl, setViewingImageUrl] = useState<string | null>(null); // Imagem em tela cheia
 
   const { activeSessionId, setActiveSessionId, isDarkMode } = useChat();
   const { user } = useAuth();
+  const flatListRef = useRef<FlatList>(null);
 
   const firstName = user?.displayName ? user.displayName.split(" ")[0] : "";
   const styles = getChatStyles(isDarkMode);
 
+  // 1. CARREGAR HISTÓRICO
   useEffect(() => {
     if (!activeSessionId) {
       setMessages([]);
@@ -73,28 +82,72 @@ export default function ChatScreen() {
     return () => unsubscribe();
   }, [activeSessionId]);
 
-  // Função para abrir a galeria de fotos
+  // 2. FUNÇÃO DE COLAR (CTRL+V) PARA A WEB
+  useEffect(() => {
+    if (Platform.OS !== "web") return;
+
+    // Escuta tudo que é colado no navegador
+    const handlePaste = (e: any) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      for (let i = 0; i < items.length; i++) {
+        // Verifica se o que foi colado é uma imagem
+        if (items[i].type.indexOf("image") !== -1) {
+          const blob = items[i].getAsFile();
+          if (blob) {
+            // Cria um link temporário para mostrar a miniatura na tela
+            const uri = URL.createObjectURL(blob);
+            setSelectedImage(uri);
+
+            // Converte a imagem colada para Base64 para enviar à IA
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              const base64String = reader.result as string;
+              // Separa apenas os dados da imagem, tirando o cabeçalho
+              const base64Data = base64String.split(",")[1];
+              setSelectedImageBase64(base64Data);
+            };
+            reader.readAsDataURL(blob);
+          }
+        }
+      }
+    };
+
+    window.addEventListener("paste", handlePaste);
+    return () => window.removeEventListener("paste", handlePaste);
+  }, []);
+
+  // 3. FUNÇÃO DO BOTÃO DE CLIPE (ANEXAR)
   const pickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
+      mediaTypes: ImagePicker.MediaTypeOptions.Images, // Correção de tipo
       allowsEditing: true,
       quality: 0.8,
+      base64: true, // SOLUÇÃO: Pede para a biblioteca já entregar o Base64 pronto!
     });
 
     if (!result.canceled && result.assets[0].uri) {
       setSelectedImage(result.assets[0].uri);
+      setSelectedImageBase64(result.assets[0].base64 || null); // Salva o Base64 direto
     }
   };
 
+  const removeImage = () => {
+    setSelectedImage(null);
+    setSelectedImageBase64(null);
+  };
+
+  // 4. FUNÇÃO DE ENVIAR MENSAGEM
   const sendMessage = async () => {
     if ((inputText.trim() === "" && !selectedImage) || !user) return;
 
     const textToSend = inputText;
-    const imageToSend = selectedImage;
+    const imageToSendUri = selectedImage;
+    const imageToSendBase64 = selectedImageBase64; // Pega o Base64 que já está pronto
 
-    // Limpa a interface imediatamente para o usuário
     setInputText("");
-    setSelectedImage(null);
+    removeImage(); // Limpa a UI
 
     let currentSessionId = activeSessionId;
 
@@ -125,22 +178,20 @@ export default function ChatScreen() {
       "messages",
     );
 
-    // 1. Salva a mensagem do aluno (com texto e/ou foto)
     await addDoc(messagesRef, {
       text: textToSend,
-      imageUrl: imageToSend || null,
+      imageUrl: imageToSendUri || null,
       sender: "user",
       createdAt: serverTimestamp(),
     });
 
-    // 2. Busca a resposta da IA
-    const promptWithContext = imageToSend
-      ? `[O aluno enviou uma imagem/exercício em anexo] ${textToSend}`
-      : textToSend;
+    // Envia o Base64 direto, sem precisar fazer "fetch" problemático
+    const aiResponseText = await getTutorResponse(
+      messages,
+      textToSend,
+      imageToSendBase64,
+    );
 
-    const aiResponseText = await getTutorResponse(messages, promptWithContext);
-
-    // 3. Salva a resposta da IA
     await addDoc(messagesRef, {
       text: aiResponseText,
       sender: "ai",
@@ -158,7 +209,12 @@ export default function ChatScreen() {
         ]}
       >
         {item.imageUrl && (
-          <Image source={{ uri: item.imageUrl }} style={styles.messageImage} />
+          <TouchableOpacity onPress={() => setViewingImageUrl(item.imageUrl!)}>
+            <Image
+              source={{ uri: item.imageUrl }}
+              style={styles.messageImage}
+            />
+          </TouchableOpacity>
         )}
         {item.text !== "" && (
           <Text
@@ -189,19 +245,25 @@ export default function ChatScreen() {
       )}
 
       <FlatList
+        ref={flatListRef}
         data={messages}
         keyExtractor={(item) => item.id}
         renderItem={renderMessage}
         contentContainerStyle={styles.messageList}
+        // ESSAS DUAS LINHAS FAZEM A MÁGICA DE DESCER A TELA
+        onContentSizeChange={() =>
+          flatListRef.current?.scrollToEnd({ animated: true })
+        }
+        onLayout={() => flatListRef.current?.scrollToEnd({ animated: true })}
       />
 
-      {/* Pré-visualização da Imagem selecionada antes de enviar */}
+      {/* PRÉ-VISUALIZAÇÃO (Antes de Enviar) */}
       {selectedImage && (
         <View style={styles.previewContainer}>
           <Image source={{ uri: selectedImage }} style={styles.previewImage} />
           <TouchableOpacity
             style={styles.removeImageButton}
-            onPress={() => setSelectedImage(null)}
+            onPress={removeImage}
           >
             <Icon name="close-circle" size={24} color="#FF4D4D" />
           </TouchableOpacity>
@@ -209,7 +271,6 @@ export default function ChatScreen() {
       )}
 
       <View style={styles.inputContainer}>
-        {/* Botão de Anexo/Clipe */}
         <TouchableOpacity style={styles.attachButton} onPress={pickImage}>
           <Icon
             name="paperclip"
@@ -220,7 +281,7 @@ export default function ChatScreen() {
 
         <TextInput
           style={styles.input}
-          placeholder="Digite sua dúvida ou anexe uma foto..."
+          placeholder="Digite sua dúvida, anexe ou cole (Ctrl+V) uma foto..."
           placeholderTextColor={isDarkMode ? "#888" : "#aaa"}
           value={inputText}
           onChangeText={setInputText}
@@ -230,6 +291,33 @@ export default function ChatScreen() {
           <Text style={styles.sendButtonText}>Enviar</Text>
         </TouchableOpacity>
       </View>
+
+      {/* MODAL FULLSCREEN (Para clicar e ampliar as fotos do chat) */}
+      <Modal
+        visible={viewingImageUrl !== null}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setViewingImageUrl(null)}
+      >
+        <TouchableOpacity
+          style={styles.fullscreenContainer}
+          onPress={() => setViewingImageUrl(null)}
+        >
+          {viewingImageUrl && (
+            <Image
+              source={{ uri: viewingImageUrl }}
+              style={styles.fullscreenImage}
+              resizeMode="contain"
+            />
+          )}
+          <TouchableOpacity
+            style={styles.closeFullscreenButton}
+            onPress={() => setViewingImageUrl(null)}
+          >
+            <Icon name="close" size={30} color="#FFF" />
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -276,7 +364,6 @@ const getChatStyles = (isDarkMode: boolean) =>
       marginBottom: 8,
     },
 
-    // Painel de Pré-visualização da Foto
     previewContainer: {
       flexDirection: "row",
       alignItems: "center",
@@ -315,4 +402,21 @@ const getChatStyles = (isDarkMode: boolean) =>
       justifyContent: "center",
     },
     sendButtonText: { color: "#FFFFFF", fontWeight: "bold" },
+
+    // Estilos do Modal Fullscreen
+    fullscreenContainer: {
+      flex: 1,
+      backgroundColor: "rgba(0,0,0,0.9)",
+      justifyContent: "center",
+      alignItems: "center",
+    },
+    fullscreenImage: { width: "90%", height: "90%" },
+    closeFullscreenButton: {
+      position: "absolute",
+      top: 50,
+      right: 20,
+      backgroundColor: "rgba(255,255,255,0.2)",
+      borderRadius: 20,
+      padding: 8,
+    },
   });

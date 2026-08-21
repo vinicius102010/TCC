@@ -1,9 +1,11 @@
+// src/services/aiService.ts
+
 export const getTutorResponse = async (
   chatHistory: any[],
   newMessage: string,
+  imageDataBase64: string | null = null,
 ) => {
   try {
-    // Fazemos um POST para o nosso próprio backend local que acabamos de criar
     const response = await fetch("/api/chat", {
       method: "POST",
       headers: {
@@ -12,6 +14,7 @@ export const getTutorResponse = async (
       body: JSON.stringify({
         chatHistory,
         newMessage,
+        imageDataBase64, // Repassamos os dados binários da imagem para o backend
       }),
     });
 
@@ -20,7 +23,7 @@ export const getTutorResponse = async (
     }
 
     const data = await response.json();
-    return data.reply; // Retorna a string que o nosso backend nos enviou
+    return data.reply;
   } catch (error: any) {
     console.error("Erro ao chamar a nossa API:", error);
     return "Desculpa, estou com uma instabilidade na minha conexão no momento. Pode enviar sua dúvida novamente?";

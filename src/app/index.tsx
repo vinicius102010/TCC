@@ -1,5 +1,6 @@
 import { MaterialCommunityIcons as Icon } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
+import Head from "expo-router/head";
 import {
   addDoc,
   collection,
@@ -11,6 +12,7 @@ import {
   setDoc,
 } from "firebase/firestore";
 import { useEffect, useRef, useState } from "react";
+import Markdown from "react-markdown";
 import {
   FlatList,
   Image,
@@ -23,7 +25,8 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-
+import rehypeKatex from "rehype-katex";
+import remarkMath from "remark-math";
 import { db } from "../config/firebase";
 import { useAuth } from "../context/AuthContext";
 import { useChat } from "../context/ChatContext";
@@ -143,8 +146,8 @@ export default function ChatScreen() {
     if ((inputText.trim() === "" && !selectedImage) || !user) return;
 
     const textToSend = inputText;
-    const imageToSendUri = selectedImage;
-    const imageToSendBase64 = selectedImageBase64; // Pega o Base64 que já está pronto
+    // Não vamos mais usar o selectedImage (blob) para salvar no banco!
+    const imageToSendBase64 = selectedImageBase64;
 
     setInputText("");
     removeImage(); // Limpa a UI
@@ -178,14 +181,19 @@ export default function ChatScreen() {
       "messages",
     );
 
+    // MÁGICA AQUI: Criamos uma URI de dados permanente usando o Base64
+    let permanentImageUrl = null;
+    if (imageToSendBase64) {
+      permanentImageUrl = `data:image/jpeg;base64,${imageToSendBase64}`;
+    }
+
     await addDoc(messagesRef, {
       text: textToSend,
-      imageUrl: imageToSendUri || null,
+      imageUrl: permanentImageUrl, // Salva o Base64 embutido, e não o link temporário
       sender: "user",
       createdAt: serverTimestamp(),
     });
 
-    // Envia o Base64 direto, sem precisar fazer "fetch" problemático
     const aiResponseText = await getTutorResponse(
       messages,
       textToSend,
@@ -216,16 +224,39 @@ export default function ChatScreen() {
             />
           </TouchableOpacity>
         )}
-        {item.text !== "" && (
-          <Text
-            style={[
-              styles.messageText,
-              isUser ? styles.userText : styles.aiText,
-            ]}
-          >
-            {item.text}
-          </Text>
-        )}
+
+        {item.text !== "" &&
+          (isUser ? (
+            <Text style={[styles.messageText, styles.userText]}>
+              {item.text}
+            </Text>
+          ) : (
+            <View style={{ flex: 1, overflow: "hidden" }}>
+              {Platform.OS === "web" ? (
+                /* Na Web, usamos o ecossistema padrão de HTML/CSS para renderizar LaTeX */
+                <div
+                  style={{
+                    color: isDarkMode ? "#E0E0E0" : "#333333",
+                    fontSize: "16px",
+                    lineHeight: "1.5",
+                    fontFamily: "System-ui, -apple-system, sans-serif",
+                  }}
+                >
+                  <Markdown
+                    remarkPlugins={[remarkMath]}
+                    rehypePlugins={[rehypeKatex]}
+                  >
+                    {item.text}
+                  </Markdown>
+                </div>
+              ) : (
+                /* Fallback de segurança se abrir no celular */
+                <Text style={[styles.messageText, styles.aiText]}>
+                  {item.text}
+                </Text>
+              )}
+            </View>
+          ))}
       </View>
     );
   };
@@ -235,6 +266,12 @@ export default function ChatScreen() {
       style={styles.container}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
+      <Head>
+        <link
+          rel="stylesheet"
+          href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css"
+        />
+      </Head>
       {!activeSessionId && messages.length === 0 && (
         <View style={styles.emptyStateContainer}>
           <Text style={styles.emptyStateTitle}>

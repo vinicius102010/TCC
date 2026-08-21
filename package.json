@@ -24,15 +24,19 @@
     "expo-vector-icons": "^10.0.1",
     "expo-web-browser": "~57.0.2",
     "firebase": "^12.17.0",
+    "katex": "^0.18.4",
     "react": "19.2.3",
     "react-dom": "19.2.3",
+    "react-markdown": "^10.1.0",
     "react-native": "0.86.2",
     "react-native-gesture-handler": "~3.1.0",
     "react-native-reanimated": "4.5.1",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.0",
     "react-native-web": "^0.21.2",
-    "react-native-worklets": "0.10.1"
+    "react-native-worklets": "0.10.1",
+    "rehype-katex": "^7.0.1",
+    "remark-math": "^6.0.0"
   },
   "devDependencies": {
     "@types/react": "~19.2.2",

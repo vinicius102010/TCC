@@ -123,7 +123,7 @@ function MainLayout() {
                 onPress={() => handleSelectChat(item.id)}
               >
                 <Text style={styles.historyItemText} numberOfLines={1}>
-                  Conversa: {item.id.substring(0, 5)}...
+                  {item.titulo || "Nova Conversa"}
                 </Text>
               </TouchableOpacity>
             )}

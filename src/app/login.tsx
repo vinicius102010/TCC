@@ -1,23 +1,23 @@
-import React, { useState } from "react";
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
-  KeyboardAvoidingView,
-  Platform,
-  Alert,
-} from "react-native";
 import { MaterialCommunityIcons as Icon } from "@expo/vector-icons";
 import {
   createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
   GoogleAuthProvider,
-  signInWithPopup,
   sendPasswordResetEmail,
+  signInWithEmailAndPassword,
+  signInWithPopup,
   updateProfile,
 } from "firebase/auth";
+import { useState } from "react";
+import {
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import { auth } from "../config/firebase";
 import { useChat } from "../context/ChatContext";
 
@@ -34,10 +34,19 @@ export default function LoginScreen() {
 
   const { isDarkMode } = useChat();
   const styles = getLoginStyles(isDarkMode);
+  const [customAlert, setCustomAlert] = useState({
+    visible: false,
+    title: "",
+    message: "",
+  });
+
+  const showCustomAlert = (title: string, message: string) => {
+    setCustomAlert({ visible: true, title, message });
+  };
 
   const handleEmailAuth = async () => {
     if (isCreatingAccount && !name.trim()) {
-      Alert.alert(
+      showCustomAlert(
         "Atenção",
         "Por favor, informe como você gostaria de ser chamado.",
       );
@@ -45,13 +54,16 @@ export default function LoginScreen() {
     }
 
     if (!email || !password) {
-      Alert.alert("Atenção", "Por favor, preencha o e-mail e a senha.");
+      showCustomAlert("Atenção", "Por favor, preencha o e-mail e a senha.");
       return;
     }
 
     if (isCreatingAccount) {
       if (password !== confirmPassword) {
-        Alert.alert("Atenção", "As senhas não coincidem. Digite novamente.");
+        showCustomAlert(
+          "Atenção",
+          "As senhas não coincidem. Digite novamente.",
+        );
         return;
       }
 
@@ -63,8 +75,7 @@ export default function LoginScreen() {
         );
         await updateProfile(userCredential.user, { displayName: name });
       } catch (error: any) {
-        console.error(error);
-        Alert.alert(
+        showCustomAlert(
           "Erro ao criar conta",
           "Verifique os dados, se a senha tem no mínimo 6 caracteres, ou se o e-mail já está em uso.",
         );
@@ -73,8 +84,8 @@ export default function LoginScreen() {
       try {
         await signInWithEmailAndPassword(auth, email, password);
       } catch (error: any) {
-        console.error(error);
-        Alert.alert(
+        console.log(error);
+        showCustomAlert(
           "Erro ao entrar",
           "E-mail ou senha incorretos. Verifique seus dados e tente novamente.",
         );
@@ -84,7 +95,7 @@ export default function LoginScreen() {
 
   const handleForgotPassword = async () => {
     if (!email.trim()) {
-      Alert.alert(
+      showCustomAlert(
         "Atenção",
         "Por favor, digite seu e-mail para receber o link.",
       );
@@ -93,14 +104,14 @@ export default function LoginScreen() {
 
     try {
       await sendPasswordResetEmail(auth, email);
-      Alert.alert(
+      showCustomAlert(
         "E-mail enviado!",
         "Verifique sua caixa de entrada (e a pasta de spam) para redefinir sua senha.",
       );
       setIsForgotPassword(false); // Volta para a tela de login após enviar com sucesso
     } catch (error: any) {
-      console.error(error);
-      Alert.alert(
+      console.log(error);
+      showCustomAlert(
         "Erro",
         "Não foi possível enviar o e-mail. Verifique se o endereço está correto.",
       );
@@ -118,8 +129,8 @@ export default function LoginScreen() {
       const provider = new GoogleAuthProvider();
       await signInWithPopup(auth, provider);
     } catch (error: any) {
-      console.error(error);
-      Alert.alert(
+      console.log(error);
+      showCustomAlert(
         "Erro no login com o Google",
         "Não foi possível autenticar com a conta Google. Tente novamente.",
       );
@@ -132,11 +143,8 @@ export default function LoginScreen() {
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
       <View style={styles.card}>
-        <Text style={styles.title}>Tutor Socrático</Text>
+        <Text style={styles.title}>Lume</Text>
 
-        {/* ==========================================
-            FLUXO DE ESQUECI A SENHA
-            ========================================== */}
         {isForgotPassword ? (
           <>
             <Text style={styles.subtitle}>
@@ -171,9 +179,6 @@ export default function LoginScreen() {
             </TouchableOpacity>
           </>
         ) : (
-          /* ==========================================
-             FLUXO DE LOGIN / CADASTRO
-             ========================================== */
           <>
             <Text style={styles.subtitle}>
               {isCreatingAccount
@@ -210,7 +215,6 @@ export default function LoginScreen() {
                 value={password}
                 onChangeText={setPassword}
                 secureTextEntry={!showPassword}
-                // Adicionamos o envio com o Enter aqui (só dispara se for login)
                 onSubmitEditing={
                   isCreatingAccount ? undefined : handleEmailAuth
                 }
@@ -298,6 +302,27 @@ export default function LoginScreen() {
             </TouchableOpacity>
           </>
         )}
+        <Modal
+          visible={customAlert.visible}
+          transparent={true}
+          animationType="fade"
+        >
+          <View style={styles.alertOverlay}>
+            <View style={styles.alertBox}>
+              <Text style={styles.alertTitle}>{customAlert.title}</Text>
+              <Text style={styles.alertMessage}>{customAlert.message}</Text>
+
+              <TouchableOpacity
+                style={styles.alertButton}
+                onPress={() =>
+                  setCustomAlert({ ...customAlert, visible: false })
+                }
+              >
+                <Text style={styles.alertButtonText}>OK, entendi</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
       </View>
     </KeyboardAvoidingView>
   );
@@ -416,4 +441,42 @@ const getLoginStyles = (isDarkMode: boolean) =>
       fontWeight: "bold",
       fontSize: 16,
     },
+    alertOverlay: {
+      flex: 1,
+      backgroundColor: "rgba(0,0,0,0.7)",
+      justifyContent: "center",
+      alignItems: "center",
+      padding: 20,
+    },
+    alertBox: {
+      width: "100%",
+      maxWidth: 350,
+      backgroundColor: "#1E1E2D",
+      borderRadius: 16,
+      padding: 24,
+      alignItems: "center",
+      elevation: 5,
+    },
+    alertTitle: {
+      fontSize: 20,
+      fontWeight: "bold",
+      color: "#FFF",
+      marginBottom: 12,
+      textAlign: "center",
+    },
+    alertMessage: {
+      fontSize: 15,
+      color: "#AAA",
+      textAlign: "center",
+      marginBottom: 24,
+      lineHeight: 22,
+    },
+    alertButton: {
+      backgroundColor: "#0056b3",
+      width: "100%",
+      paddingVertical: 12,
+      borderRadius: 8,
+      alignItems: "center",
+    },
+    alertButtonText: { color: "#FFF", fontWeight: "bold", fontSize: 16 },
   });

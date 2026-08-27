@@ -96,11 +96,7 @@ async function callOpenRouterFallback(
   );
 }
 
-export const config = { runtime: "edge" };
-
-export default async function handler(req: Request) {
-  if (req.method !== "POST")
-    return new Response("Método não permitido", { status: 405 });
+export async function POST(req: Request) {
   try {
     const body = await req.json();
     const { chatHistory = [], newMessage = "", imageDataBase64 = null } = body;

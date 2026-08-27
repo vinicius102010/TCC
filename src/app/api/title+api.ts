@@ -42,11 +42,7 @@ async function callOpenRouterTitleFallback(prompt: string) {
   return data.choices[0]?.message?.content?.trim() || "Nova Conversa";
 }
 
-export const config = { runtime: "edge" };
-
-export default async function handler(req: Request) {
-  if (req.method !== "POST")
-    return new Response("Método não permitido", { status: 405 });
+export async function POST(req: Request) {
   try {
     const { userMessage, aiResponse } = await req.json();
 

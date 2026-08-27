@@ -15,6 +15,10 @@ import {
   Text,
   TouchableOpacity,
   View,
+  ActivityIndicator,
+  Modal,
+  TextInput,
+  Alert,
 } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { db } from "../config/firebase";
@@ -24,6 +28,9 @@ import { ChatProvider, useChat } from "../context/ChatContext";
 function MainLayout() {
   const [isMenuOpen, setIsMenuOpen] = useState(Platform.OS === "web");
   const [conversations, setConversations] = useState<any[]>([]);
+  const [isSacVisible, setIsSacVisible] = useState(false);
+  const [sacMessage, setSacMessage] = useState('');
+  const [isSendingSac, setIsSendingSac] = useState(false);
 
   const { activeSessionId, setActiveSessionId, isDarkMode, toggleTheme } =
     useChat();
@@ -98,6 +105,44 @@ function MainLayout() {
       </View>
     );
   }
+  const handleSendSac = async () => {
+      if (sacMessage.trim() === '') {
+        Alert.alert("Atenção", "Digite uma mensagem antes de enviar.");
+        return;
+      }
+
+      setIsSendingSac(true);
+
+      try {
+        // Substitua pelo SEU link do Formspree gerado no Passo 1
+        const FORMSPREE_ENDPOINT = 'https://formspree.io/f/mljergjo';
+
+        const response = await fetch(FORMSPREE_ENDPOINT, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({
+            nomeAluno: user?.displayName || 'Aluno sem nome',
+            emailAluno: user?.email || 'Sem email',
+            mensagem: sacMessage
+          })
+        });
+
+        if (response.ok) {
+          Alert.alert("Sucesso!", "Sua mensagem foi enviada. Responderemos em breve no seu e-mail.");
+          setIsSacVisible(false);
+          setSacMessage('');
+        } else {
+          throw new Error("Falha na requisição");
+        }
+      } catch (error) {
+        Alert.alert("Erro", "Não foi possível enviar a mensagem. Tente novamente mais tarde.");
+      } finally {
+        setIsSendingSac(false);
+      }
+    }
 
   return (
     <View style={styles.container}>
@@ -144,6 +189,9 @@ function MainLayout() {
             />
             <Text style={styles.logoutButtonText}>Sair da Conta</Text>
           </TouchableOpacity>
+          <TouchableOpacity style={styles.sacButton} onPress={() => setIsSacVisible(true)}>
+            <Text style={styles.sacButtonText}>Precisa de ajuda? SAC</Text>
+          </TouchableOpacity>
         </View>
       )}
 
@@ -165,6 +213,51 @@ function MainLayout() {
         </View>
         <Slot />
       </View>
+      <Modal
+              visible={isSacVisible}
+              transparent={true}
+              animationType="slide"
+              onRequestClose={() => setIsSacVisible(false)}
+            >
+              <View style={styles.modalOverlay}>
+                <View style={styles.modalContainer}>
+                  <Text style={styles.modalTitle}>Fale com o Suporte</Text>
+                  <Text style={styles.modalSubtitle}>
+                    Encontrou um erro ou tem alguma sugestão para melhorar o tutor? Mande para a gente!
+                  </Text>
+
+                  <TextInput
+                    style={styles.sacInput}
+                    placeholder="Digite sua mensagem aqui..."
+                    placeholderTextColor="#888"
+                    multiline
+                    numberOfLines={5}
+                    value={sacMessage}
+                    onChangeText={setSacMessage}
+                    textAlignVertical="top" // Para alinhar o texto no topo da caixa
+                  />
+
+                  <View style={styles.modalButtons}>
+                    <TouchableOpacity
+                      style={styles.cancelButton}
+                      onPress={() => { setIsSacVisible(false); setSacMessage(''); }}
+                    >
+                      <Text style={styles.cancelButtonText}>Cancelar</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.sendSacButton}
+                      onPress={handleSendSac}
+                      disabled={isSendingSac}
+                    >
+                      <Text style={styles.sendSacButtonText}>
+                        {isSendingSac ? "Enviando..." : "Enviar Mensagem"}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </View>
+            </Modal>
     </View>
   );
 }
@@ -258,4 +351,16 @@ const getLayoutStyles = (isDarkMode: boolean) =>
       justifyContent: "center",
     },
     themeIcon: { fontSize: 16 },
+    sacButton: { marginTop: 15, padding: 12, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 8, alignItems: 'center' },
+    sacButtonText: { color: '#82B1FF', fontWeight: 'bold' },
+    modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+    modalContainer: { width: '100%', maxWidth: 450, backgroundColor: '#1E1E2D', borderRadius: 16, padding: 24, elevation: 5 },
+    modalTitle: { fontSize: 22, fontWeight: 'bold', color: '#FFF', marginBottom: 8 },
+    modalSubtitle: { fontSize: 14, color: '#AAA', marginBottom: 20, lineHeight: 20 },
+    sacInput: { backgroundColor: '#121212', color: '#FFF', borderRadius: 8, padding: 16, fontSize: 16, minHeight: 120, borderWidth: 1, borderColor: '#333', marginBottom: 20 },
+    modalButtons: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12 },
+    cancelButton: { paddingVertical: 10, paddingHorizontal: 16, borderRadius: 8 },
+    cancelButtonText: { color: '#FF4D4D', fontWeight: 'bold', fontSize: 16 },
+    sendSacButton: { backgroundColor: '#0056b3', paddingVertical: 10, paddingHorizontal: 20, borderRadius: 8, justifyContent: 'center' },
+    sendSacButtonText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 }
   });

@@ -10,6 +10,7 @@ import {
   query,
   serverTimestamp,
   setDoc,
+  updateDoc,
 } from "firebase/firestore";
 import { useEffect, useRef, useState } from "react";
 import Markdown from "react-markdown";
@@ -30,7 +31,7 @@ import remarkMath from "remark-math";
 import { db } from "../config/firebase";
 import { useAuth } from "../context/AuthContext";
 import { useChat } from "../context/ChatContext";
-import { getTutorResponse } from "../services/aiService";
+import { getTutorResponse, generateChatTitle } from "../services/aiService";
 
 type Message = {
   id: string;
@@ -143,69 +144,68 @@ export default function ChatScreen() {
 
   // 4. FUNÇÃO DE ENVIAR MENSAGEM
   const sendMessage = async () => {
-    if ((inputText.trim() === "" && !selectedImage) || !user) return;
+      if ((inputText.trim() === '' && !selectedImage) || !user) return;
 
-    const textToSend = inputText;
-    // Não vamos mais usar o selectedImage (blob) para salvar no banco!
-    const imageToSendBase64 = selectedImageBase64;
+      const textToSend = inputText;
+      const imageToSendBase64 = selectedImageBase64;
 
-    setInputText("");
-    removeImage(); // Limpa a UI
+      setInputText('');
+      removeImage();
 
-    let currentSessionId = activeSessionId;
+      let currentSessionId = activeSessionId;
+      let isFirstInteraction = false; // FLAG PARA SABER SE É CONVERSA NOVA
 
-    if (!currentSessionId) {
-      const newSessionRef = doc(collection(db, "conversations"));
-      currentSessionId = newSessionRef.id;
+      if (!currentSessionId) {
+        isFirstInteraction = true;
+        const newSessionRef = doc(collection(db, 'conversations'));
+        currentSessionId = newSessionRef.id;
 
-      await setDoc(newSessionRef, {
-        alunoId: user.uid,
-        alunoNome: user.displayName || "Aluno",
-        ultimaInteracao: serverTimestamp(),
+        // Cria a conversa instantaneamente com um título provisório
+        await setDoc(newSessionRef, {
+          alunoId: user.uid,
+          alunoNome: user.displayName || 'Aluno',
+          titulo: 'Nova Conversa...',
+          ultimaInteracao: serverTimestamp()
+        });
+
+        setActiveSessionId(currentSessionId);
+      } else {
+        const sessionDocRef = doc(db, 'conversations', currentSessionId);
+        await setDoc(sessionDocRef, { ultimaInteracao: serverTimestamp() }, { merge: true });
+      }
+
+      const messagesRef = collection(db, 'conversations', currentSessionId, 'messages');
+
+      let permanentImageUrl = null;
+      if (imageToSendBase64) {
+        permanentImageUrl = `data:image/jpeg;base64,${imageToSendBase64}`;
+      }
+
+      await addDoc(messagesRef, {
+        text: textToSend,
+        imageUrl: permanentImageUrl,
+        sender: 'user',
+        createdAt: serverTimestamp()
       });
 
-      setActiveSessionId(currentSessionId);
-    } else {
-      const sessionDocRef = doc(db, "conversations", currentSessionId);
-      await setDoc(
-        sessionDocRef,
-        { ultimaInteracao: serverTimestamp() },
-        { merge: true },
-      );
-    }
+      // Pega a resposta do Tutor
+      const aiResponseText = await getTutorResponse(messages, textToSend, imageToSendBase64);
 
-    const messagesRef = collection(
-      db,
-      "conversations",
-      currentSessionId,
-      "messages",
-    );
+      await addDoc(messagesRef, {
+        text: aiResponseText,
+        sender: 'ai',
+        createdAt: serverTimestamp()
+      });
 
-    // MÁGICA AQUI: Criamos uma URI de dados permanente usando o Base64
-    let permanentImageUrl = null;
-    if (imageToSendBase64) {
-      permanentImageUrl = `data:image/jpeg;base64,${imageToSendBase64}`;
-    }
-
-    await addDoc(messagesRef, {
-      text: textToSend,
-      imageUrl: permanentImageUrl, // Salva o Base64 embutido, e não o link temporário
-      sender: "user",
-      createdAt: serverTimestamp(),
-    });
-
-    const aiResponseText = await getTutorResponse(
-      messages,
-      textToSend,
-      imageToSendBase64,
-    );
-
-    await addDoc(messagesRef, {
-      text: aiResponseText,
-      sender: "ai",
-      createdAt: serverTimestamp(),
-    });
-  };
+      // SE FOI A PRIMEIRA MENSAGEM, GERA O TÍTULO EM SEGUNDO PLANO
+      if (isFirstInteraction) {
+        generateChatTitle(textToSend, aiResponseText).then(async (newTitle) => {
+          const sessionDocRef = doc(db, 'conversations', currentSessionId);
+          // Atualiza apenas o campo 'titulo' de forma silenciosa
+          await updateDoc(sessionDocRef, { titulo: newTitle });
+        });
+      }
+    };
 
   const renderMessage = ({ item }: { item: Message }) => {
     const isUser = item.sender === "user";

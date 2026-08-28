@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "tutor-tcc",
-    "slug": "tutor-tcc",
+    "name": "LUME",
+    "slug": "lume-tutor",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "tutortcc",
+    "scheme": "lume-tutor",
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon"
@@ -20,6 +20,7 @@
       "predictiveBackGestureEnabled": false
     },
     "web": {
+      "bundler": "metro",
       "output": "server",
       "favicon": "./assets/images/favicon.png"
     },

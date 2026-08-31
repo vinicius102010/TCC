@@ -2,7 +2,7 @@ name: Deploy web
 
 on:
   push:
-    branches: ["main"]
+    branches: ["master"]
 
 jobs:
   deploy_web:

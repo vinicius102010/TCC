@@ -2,9 +2,11 @@ import { MaterialCommunityIcons as Icon } from "@expo/vector-icons";
 import { Slot, useRouter, useSegments } from "expo-router";
 import {
   collection,
+  doc,
   onSnapshot,
   orderBy,
   query,
+  updateDoc,
   where,
 } from "firebase/firestore";
 import { useEffect, useState } from "react";
@@ -63,10 +65,12 @@ function MainLayout() {
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const sessions = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
+      const sessions = snapshot.docs
+        .map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }))
+        .filter((session: any) => !session.hidden); // Filtra as conversas ocultas
       setConversations(sessions);
     });
     return () => unsubscribe();
@@ -80,6 +84,32 @@ function MainLayout() {
   const handleSelectChat = (id: string) => {
     setActiveSessionId(id);
     if (Platform.OS !== "web") setIsMenuOpen(false);
+  };
+  const handleHideChat = (id: string, title: string) => {
+    Alert.alert(
+      "Excluir Conversa",
+      `Tem certeza que deseja excluir "${title || "Nova Conversa"}"?`,
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Excluir",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              const chatRef = doc(db, "conversations", id);
+              await updateDoc(chatRef, { hidden: true });
+
+              if (activeSessionId === id) {
+                setActiveSessionId(null);
+              }
+            } catch (error) {
+              console.error("Erro ao excluir:", error);
+              Alert.alert("Erro", "Não foi possível excluir a conversa.");
+            }
+          },
+        },
+      ],
+    );
   };
 
   const isLoginPage = segments[0] === "login";
@@ -162,17 +192,42 @@ function MainLayout() {
             data={conversations}
             keyExtractor={(item) => item.id}
             renderItem={({ item }) => (
-              <TouchableOpacity
+              // 1. O contêiner externo DEVE ser uma View, nunca um TouchableOpacity
+              <View
                 style={[
                   styles.historyItem,
                   activeSessionId === item.id && styles.historyItemActive,
+                  // Forçamos o layout em linha aqui para garantir que o ícone vá para a lateral
+                  {
+                    flexDirection: "row",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: 0,
+                  },
                 ]}
-                onPress={() => handleSelectChat(item.id)}
               >
-                <Text style={styles.historyItemText} numberOfLines={1}>
-                  {item.titulo || "Nova Conversa"}
-                </Text>
-              </TouchableOpacity>
+                <TouchableOpacity
+                  style={{ flex: 1, padding: 12 }}
+                  onPress={() => handleSelectChat(item.id)}
+                >
+                  <Text style={styles.historyItemText} numberOfLines={1}>
+                    {item.titulo || "Nova Conversa"}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={{ padding: 12 }}
+                  onPress={() => {
+                    handleHideChat(item.id, item.titulo);
+                    console.log("Clicou no ícone de lixeira");
+                  }}
+                >
+                  <Icon
+                    name="trash-can-outline"
+                    size={20}
+                    color={isDarkMode ? "#888" : "#A0A0A0"}
+                  />
+                </TouchableOpacity>
+              </View>
             )}
             ListEmptyComponent={
               <Text style={styles.historyPlaceholder}>

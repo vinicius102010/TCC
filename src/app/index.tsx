@@ -1,4 +1,5 @@
 import { MaterialCommunityIcons as Icon } from "@expo/vector-icons";
+import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 import Head from "expo-router/head";
 import {
@@ -12,6 +13,7 @@ import {
   setDoc,
   updateDoc,
 } from "firebase/firestore";
+import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { useEffect, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import {
@@ -20,6 +22,7 @@ import {
   KeyboardAvoidingView,
   Modal,
   Platform,
+  Pressable,
   StyleSheet,
   Text,
   TextInput,
@@ -28,10 +31,14 @@ import {
 } from "react-native";
 import rehypeKatex from "rehype-katex";
 import remarkMath from "remark-math";
-import { db } from "../config/firebase";
+import { db, storage } from "../config/firebase";
 import { useAuth } from "../context/AuthContext";
 import { useChat } from "../context/ChatContext";
-import { getTutorResponse, generateChatTitle } from "../services/aiService";
+import {
+  generateChatTitle,
+  getTutorResponse,
+  PdfFileData,
+} from "../services/aiService";
 
 type Message = {
   id: string;
@@ -39,6 +46,10 @@ type Message = {
   sender: "user" | "ai";
   imageUrl?: string;
   createdAt?: any;
+  fileUrl?: string;
+  fileName?: string;
+  fileType?: string;
+  fileSize?: number;
 };
 
 export default function ChatScreen() {
@@ -51,10 +62,11 @@ export default function ChatScreen() {
     null,
   ); // Dados reais para a IA
   const [viewingImageUrl, setViewingImageUrl] = useState<string | null>(null); // Imagem em tela cheia
-
+  const [selectedPdf, setSelectedPdf] = useState<PdfFileData | null>(null);
   const { activeSessionId, setActiveSessionId, isDarkMode } = useChat();
   const { user } = useAuth();
   const flatListRef = useRef<FlatList>(null);
+  const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
 
   const firstName = user?.displayName ? user.displayName.split(" ")[0] : "";
   const styles = getChatStyles(isDarkMode);
@@ -136,76 +148,186 @@ export default function ChatScreen() {
       setSelectedImageBase64(result.assets[0].base64 || null); // Salva o Base64 direto
     }
   };
+  const pickPdf = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: "application/pdf",
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+
+      if (result.canceled || !result.assets?.[0]) {
+        return;
+      }
+
+      const asset = result.assets[0];
+
+      const MAX_FILE_SIZE = 20 * 1024 * 1024;
+
+      if (asset.size && asset.size > MAX_FILE_SIZE) {
+        console.warn("PDF maior que 20 MB.");
+        return;
+      }
+
+      const pdfData: PdfFileData = {
+        uri: asset.uri,
+        name: asset.name || "documento.pdf",
+        mimeType: asset.mimeType || "application/pdf",
+        size: asset.size,
+        webFile: Platform.OS === "web" ? asset.file : undefined,
+      };
+
+      setSelectedPdf(pdfData);
+    } catch (error) {
+      console.error("Erro ao selecionar PDF:", error);
+    }
+  };
 
   const removeImage = () => {
     setSelectedImage(null);
     setSelectedImageBase64(null);
   };
+  const removePdf = () => {
+    setSelectedPdf(null);
+  };
 
+  const uploadPdfToStorage = async (
+    pdfFile: PdfFileData,
+    conversationId: string,
+    messageId: string,
+  ) => {
+    let blob: Blob;
+
+    if (pdfFile.webFile) {
+      blob = pdfFile.webFile;
+    } else {
+      const response = await fetch(pdfFile.uri);
+      blob = await response.blob();
+    }
+
+    const storagePath = `conversations/${conversationId}/files/${messageId}.pdf`;
+
+    const storageRef = ref(storage, storagePath);
+
+    await uploadBytes(storageRef, blob, {
+      contentType: "application/pdf",
+      customMetadata: {
+        originalName: pdfFile.name,
+      },
+    });
+
+    const downloadUrl = await getDownloadURL(storageRef);
+
+    return downloadUrl;
+  };
   // 4. FUNÇÃO DE ENVIAR MENSAGEM
   const sendMessage = async () => {
-      if ((inputText.trim() === '' && !selectedImage) || !user) return;
+    if ((inputText.trim() === "" && !selectedImage && !selectedPdf) || !user) {
+      return;
+    }
 
-      const textToSend = inputText;
-      const imageToSendBase64 = selectedImageBase64;
+    const textToSend = inputText;
+    const imageToSendBase64 = selectedImageBase64;
+    const pdfToSend = selectedPdf;
 
-      setInputText('');
-      removeImage();
+    setInputText("");
+    removeImage();
+    removePdf();
 
-      let currentSessionId = activeSessionId;
-      let isFirstInteraction = false; // FLAG PARA SABER SE É CONVERSA NOVA
+    let currentSessionId = activeSessionId;
+    let isFirstInteraction = false;
 
-      if (!currentSessionId) {
-        isFirstInteraction = true;
-        const newSessionRef = doc(collection(db, 'conversations'));
-        currentSessionId = newSessionRef.id;
+    if (!currentSessionId) {
+      isFirstInteraction = true;
 
-        // Cria a conversa instantaneamente com um título provisório
-        await setDoc(newSessionRef, {
-          alunoId: user.uid,
-          alunoNome: user.displayName || 'Aluno',
-          titulo: 'Nova Conversa...',
-          ultimaInteracao: serverTimestamp()
-        });
+      const newSessionRef = doc(collection(db, "conversations"));
 
-        setActiveSessionId(currentSessionId);
-      } else {
-        const sessionDocRef = doc(db, 'conversations', currentSessionId);
-        await setDoc(sessionDocRef, { ultimaInteracao: serverTimestamp() }, { merge: true });
-      }
+      currentSessionId = newSessionRef.id;
 
-      const messagesRef = collection(db, 'conversations', currentSessionId, 'messages');
-
-      let permanentImageUrl = null;
-      if (imageToSendBase64) {
-        permanentImageUrl = `data:image/jpeg;base64,${imageToSendBase64}`;
-      }
-
-      await addDoc(messagesRef, {
-        text: textToSend,
-        imageUrl: permanentImageUrl,
-        sender: 'user',
-        createdAt: serverTimestamp()
+      await setDoc(newSessionRef, {
+        alunoId: user.uid,
+        alunoNome: user.displayName || "Aluno",
+        titulo: "Nova Conversa...",
+        ultimaInteracao: serverTimestamp(),
       });
 
-      // Pega a resposta do Tutor
-      const aiResponseText = await getTutorResponse(messages, textToSend, imageToSendBase64);
+      setActiveSessionId(currentSessionId);
+    } else {
+      const sessionDocRef = doc(db, "conversations", currentSessionId);
 
-      await addDoc(messagesRef, {
-        text: aiResponseText,
-        sender: 'ai',
-        createdAt: serverTimestamp()
-      });
+      await setDoc(
+        sessionDocRef,
+        {
+          ultimaInteracao: serverTimestamp(),
+        },
+        {
+          merge: true,
+        },
+      );
+    }
 
-      // SE FOI A PRIMEIRA MENSAGEM, GERA O TÍTULO EM SEGUNDO PLANO
-      if (isFirstInteraction) {
-        generateChatTitle(textToSend, aiResponseText).then(async (newTitle) => {
-          const sessionDocRef = doc(db, 'conversations', currentSessionId);
-          // Atualiza apenas o campo 'titulo' de forma silenciosa
-          await updateDoc(sessionDocRef, { titulo: newTitle });
+    const messagesRef = collection(
+      db,
+      "conversations",
+      currentSessionId,
+      "messages",
+    );
+
+    const userMessageRef = doc(messagesRef);
+
+    let permanentImageUrl: string | null = null;
+
+    if (imageToSendBase64) {
+      permanentImageUrl = `data:image/jpeg;base64,${imageToSendBase64}`;
+    }
+
+    let permanentPdfUrl: string | null = null;
+
+    if (pdfToSend) {
+      permanentPdfUrl = await uploadPdfToStorage(
+        pdfToSend,
+        currentSessionId,
+        userMessageRef.id,
+      );
+    }
+
+    await setDoc(userMessageRef, {
+      text: textToSend,
+
+      imageUrl: permanentImageUrl,
+
+      fileUrl: permanentPdfUrl,
+      fileName: pdfToSend?.name || null,
+      fileType: pdfToSend?.mimeType || null,
+      fileSize: pdfToSend?.size || null,
+
+      sender: "user",
+      createdAt: serverTimestamp(),
+    });
+
+    const aiResponseText = await getTutorResponse(
+      messages,
+      textToSend,
+      imageToSendBase64,
+      pdfToSend,
+    );
+
+    await addDoc(messagesRef, {
+      text: aiResponseText,
+      sender: "ai",
+      createdAt: serverTimestamp(),
+    });
+
+    if (isFirstInteraction) {
+      generateChatTitle(textToSend, aiResponseText).then(async (newTitle) => {
+        const sessionDocRef = doc(db, "conversations", currentSessionId!);
+
+        await updateDoc(sessionDocRef, {
+          titulo: newTitle,
         });
-      }
-    };
+      });
+    }
+  };
 
   const renderMessage = ({ item }: { item: Message }) => {
     const isUser = item.sender === "user";
@@ -216,6 +338,45 @@ export default function ChatScreen() {
           isUser ? styles.userBubble : styles.aiBubble,
         ]}
       >
+        {item.fileUrl && (
+          <TouchableOpacity
+            style={styles.fileAttachment}
+            onPress={() => {
+              if (Platform.OS === "web") {
+                window.open(item.fileUrl, "_blank");
+              }
+            }}
+          >
+            <Icon
+              name="file-pdf-box"
+              size={38}
+              color={isUser ? "#FFFFFF" : "#D32F2F"}
+            />
+
+            <View style={styles.fileInfo}>
+              <Text
+                style={[
+                  styles.fileName,
+                  isUser ? styles.userText : styles.aiText,
+                ]}
+                numberOfLines={2}
+              >
+                {item.fileName || "Documento PDF"}
+              </Text>
+
+              {item.fileSize && (
+                <Text
+                  style={[
+                    styles.fileSize,
+                    isUser ? { color: "#DDE7FF" } : styles.aiText,
+                  ]}
+                >
+                  {(item.fileSize / 1024 / 1024).toFixed(2)} MB
+                </Text>
+              )}
+            </View>
+          </TouchableOpacity>
+        )}
         {item.imageUrl && (
           <TouchableOpacity onPress={() => setViewingImageUrl(item.imageUrl!)}>
             <Image
@@ -306,19 +467,126 @@ export default function ChatScreen() {
           </TouchableOpacity>
         </View>
       )}
+      {selectedPdf && (
+        <View style={styles.previewContainer}>
+          <Icon name="file-pdf-box" size={40} color="#D32F2F" />
+
+          <View style={styles.pdfPreviewInfo}>
+            <Text
+              style={[
+                styles.pdfPreviewName,
+                {
+                  color: isDarkMode ? "#FFFFFF" : "#333333",
+                },
+              ]}
+              numberOfLines={1}
+            >
+              {selectedPdf.name}
+            </Text>
+
+            {selectedPdf.size && (
+              <Text
+                style={[
+                  styles.pdfPreviewSize,
+                  {
+                    color: isDarkMode ? "#AAAAAA" : "#777777",
+                  },
+                ]}
+              >
+                {(selectedPdf.size / 1024 / 1024).toFixed(2)} MB
+              </Text>
+            )}
+          </View>
+
+          <TouchableOpacity
+            style={styles.removeImageButton}
+            onPress={removePdf}
+          >
+            <Icon name="close-circle" size={24} color="#FF4D4D" />
+          </TouchableOpacity>
+        </View>
+      )}
 
       <View style={styles.inputContainer}>
-        <TouchableOpacity style={styles.attachButton} onPress={pickImage}>
+        <TouchableOpacity
+          style={styles.attachButton}
+          onPress={() => setShowAttachmentMenu(true)}
+        >
           <Icon
             name="paperclip"
             size={22}
             color={isDarkMode ? "#888" : "#666"}
           />
         </TouchableOpacity>
+        <Modal
+          visible={showAttachmentMenu}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowAttachmentMenu(false)}
+        >
+          <Pressable
+            style={styles.attachmentModalOverlay}
+            onPress={() => setShowAttachmentMenu(false)}
+          >
+            <Pressable
+              style={styles.attachmentMenu}
+              onPress={(event) => event.stopPropagation()}
+            >
+              <Text style={styles.attachmentMenuTitle}>Adicionar anexo</Text>
+
+              <TouchableOpacity
+                style={styles.attachmentOption}
+                onPress={() => {
+                  setShowAttachmentMenu(false);
+                  pickImage();
+                }}
+              >
+                <View style={styles.attachmentIconContainer}>
+                  <Icon name="image-outline" size={24} color="#555" />
+                </View>
+
+                <View style={styles.attachmentOptionText}>
+                  <Text style={styles.attachmentOptionTitle}>Imagem</Text>
+
+                  <Text style={styles.attachmentOptionDescription}>
+                    Enviar uma imagem para o tutor
+                  </Text>
+                </View>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.attachmentOption}
+                onPress={() => {
+                  setShowAttachmentMenu(false);
+                  pickPdf();
+                }}
+              >
+                <View style={styles.attachmentIconContainer}>
+                  <Icon name="file-document-outline" size={24} color="#555" />
+                </View>
+
+                <View style={styles.attachmentOptionText}>
+                  <Text style={styles.attachmentOptionTitle}>Arquivo PDF</Text>
+
+                  <Text style={styles.attachmentOptionDescription}>
+                    Enviar um arquivo PDF
+                  </Text>
+                </View>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.attachmentCancel}
+                onPress={() => setShowAttachmentMenu(false)}
+              >
+                <Text style={styles.attachmentCancelText}>Cancelar</Text>
+              </TouchableOpacity>
+            </Pressable>
+          </Pressable>
+        </Modal>
 
         <TextInput
           style={styles.input}
-          placeholder="Digite sua dúvida, anexe ou cole (Ctrl+V) uma foto..."
+          placeholder="Digite sua dúvida, anexe ou cole um arquivo..."
           placeholderTextColor={isDarkMode ? "#888" : "#aaa"}
           value={inputText}
           onChangeText={setInputText}
@@ -455,5 +723,110 @@ const getChatStyles = (isDarkMode: boolean) =>
       backgroundColor: "rgba(255,255,255,0.2)",
       borderRadius: 20,
       padding: 8,
+    },
+    fileAttachment: {
+      flexDirection: "row",
+      alignItems: "center",
+      padding: 10,
+      borderRadius: 10,
+      marginBottom: 8,
+      backgroundColor: "rgba(0,0,0,0.08)",
+      minWidth: 220,
+    },
+
+    fileInfo: {
+      flex: 1,
+      marginLeft: 8,
+    },
+
+    fileName: {
+      fontSize: 14,
+      fontWeight: "600",
+    },
+
+    fileSize: {
+      fontSize: 12,
+      marginTop: 3,
+    },
+
+    pdfPreviewInfo: {
+      flex: 1,
+      marginHorizontal: 8,
+    },
+
+    pdfPreviewName: {
+      fontSize: 14,
+      fontWeight: "600",
+    },
+
+    pdfPreviewSize: {
+      fontSize: 12,
+      marginTop: 2,
+    },
+    attachmentModalOverlay: {
+      flex: 1,
+      backgroundColor: "rgba(0, 0, 0, 0.4)",
+      justifyContent: "flex-end",
+    },
+
+    attachmentMenu: {
+      backgroundColor: "#fff",
+      borderTopLeftRadius: 20,
+      borderTopRightRadius: 20,
+      padding: 20,
+      paddingBottom: 30,
+    },
+
+    attachmentMenuTitle: {
+      fontSize: 18,
+      fontWeight: "600",
+      marginBottom: 15,
+      color: "#222",
+    },
+
+    attachmentOption: {
+      flexDirection: "row",
+      alignItems: "center",
+      paddingVertical: 14,
+      borderBottomWidth: 1,
+      borderBottomColor: "#eee",
+    },
+
+    attachmentIconContainer: {
+      width: 45,
+      height: 45,
+      borderRadius: 12,
+      backgroundColor: "#f2f2f2",
+      alignItems: "center",
+      justifyContent: "center",
+      marginRight: 12,
+    },
+
+    attachmentOptionText: {
+      flex: 1,
+    },
+
+    attachmentOptionTitle: {
+      fontSize: 16,
+      fontWeight: "600",
+      color: "#222",
+    },
+
+    attachmentOptionDescription: {
+      fontSize: 13,
+      color: "#777",
+      marginTop: 3,
+    },
+
+    attachmentCancel: {
+      marginTop: 15,
+      alignItems: "center",
+      paddingVertical: 12,
+    },
+
+    attachmentCancelText: {
+      fontSize: 16,
+      fontWeight: "600",
+      color: "#555",
     },
   });

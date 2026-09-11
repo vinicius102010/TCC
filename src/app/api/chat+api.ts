@@ -1,17 +1,17 @@
 // src/app/api/chat+api.ts
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
-const arrayBufferToBase64 = (arrayBuffer: ArrayBuffer) => {
-  const bytes = new Uint8Array(arrayBuffer);
+// const arrayBufferToBase64 = (arrayBuffer: ArrayBuffer) => {
+//   const bytes = new Uint8Array(arrayBuffer);
 
-  let binary = "";
+//   let binary = "";
 
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
+//   for (let i = 0; i < bytes.byteLength; i++) {
+//     binary += String.fromCharCode(bytes[i]);
+//   }
 
-  return btoa(binary);
-};
+//   return btoa(binary);
+// };
 
 const API_KEY = process.env.GEMINI_API_KEY || "";
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || "";
@@ -39,6 +39,8 @@ REGRAS OBRIGATÓRIAS:
 6. Sempre formate a matemática utilizando notação LaTeX para garantir a melhor visualização.
   a) Para fórmulas no meio da frase, use um único cifrão (ex: $f(x) = ax + b$).
   b) Para equações em destaque numa linha separada, use dois cifrões (ex: $$ x = \\frac{-b \\pm \\sqrt{\\Delta}}{2a} $$).
+  c) PERIGO: NUNCA coloque palavras, frases ou texto comum dentro dos cifrões de matemática. Espaços são ignorados no modo matemático.
+  d) Para falar de dinheiro, use a sigla da moeda sem criar blocos matemáticos (ex: R$ 10,00 ou US$ 0.43). Não use o cifrão isolado ($) para dinheiro, pois o sistema vai achar que é o início de uma equação.
 7. Caso o aluno envie uma pergunta sobre outra disciplina, responda educadamente que você é um tutor focado em matemática, mas ajude ele, seguindo as mesmas regras anteriores.
 `;
 
@@ -202,7 +204,8 @@ export async function POST(req: Request) {
 
       const arrayBuffer = await file.arrayBuffer();
 
-      const base64Data = arrayBufferToBase64(arrayBuffer);
+      // @ts-ignore
+      const base64Data = Buffer.from(arrayBuffer).toString("base64");
 
       pdfFile = {
         data: base64Data,
@@ -211,24 +214,68 @@ export async function POST(req: Request) {
       };
     }
 
-    // =========================================================
-    // 1. TENTATIVA PRINCIPAL: GOOGLE GEMINI
-    // =========================================================
-
     try {
       const model = genAI.getGenerativeModel({
         model: "gemini-3.5-flash-lite",
         systemInstruction: SYSTEM_INSTRUCTION,
       });
 
-      const formattedHistory = chatHistory.map((msg: any) => ({
-        role: msg.sender === "user" ? "user" : "model",
-        parts: [
-          {
-            text: msg.text || "",
-          },
-        ],
-      }));
+      const formattedHistory = await Promise.all(
+        chatHistory.map(async (msg: any) => {
+          const parts: any[] = [];
+
+          // 1. Adiciona o texto da mensagem histórica
+          if (msg.text) {
+            parts.push({ text: msg.text });
+          }
+
+          // 2. Se a mensagem tinha uma imagem, baixa a URL e converte usando a sua função
+          if (msg.imageUrl && msg.sender === "user") {
+            try {
+              const imgRes = await fetch(msg.imageUrl);
+              const imgBuffer = await imgRes.arrayBuffer();
+              // @ts-ignore
+              const base64Img = Buffer.from(imgBuffer).toString("base64");
+              parts.push({
+                inlineData: {
+                  data: base64Img,
+                  mimeType: "image/jpeg",
+                },
+              });
+            } catch (e) {
+              console.error("Erro ao recarregar imagem do histórico:", e);
+            }
+          }
+
+          // 3. Se a mensagem tinha um PDF, baixa a URL e converte usando a sua função
+          if (msg.fileUrl && msg.sender === "user") {
+            try {
+              const pdfRes = await fetch(msg.fileUrl);
+              const pdfBuffer = await pdfRes.arrayBuffer();
+              // @ts-ignore
+              const base64Pdf = Buffer.from(pdfBuffer).toString("base64");
+              parts.push({
+                inlineData: {
+                  data: base64Pdf,
+                  mimeType: "application/pdf",
+                },
+              });
+            } catch (e) {
+              console.error("Erro ao recarregar PDF do histórico:", e);
+            }
+          }
+
+          // Prevenção contra array de partes vazio
+          if (parts.length === 0) {
+            parts.push({ text: " " });
+          }
+
+          return {
+            role: msg.sender === "user" ? "user" : "model",
+            parts: parts,
+          };
+        }),
+      );
 
       const chat = model.startChat({
         history: formattedHistory,
@@ -282,10 +329,6 @@ export async function POST(req: Request) {
         "⚠️ Falha na API direta do Gemini. Acionando fallback do OpenRouter...",
         geminiError?.message || geminiError,
       );
-
-      // =======================================================
-      // 2. FALLBACK: OPENROUTER
-      // =======================================================
 
       const fallbackReply = await callOpenRouterFallback(
         chatHistory,

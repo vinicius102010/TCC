@@ -32,7 +32,7 @@ export default function LoginScreen() {
   const [isCreatingAccount, setIsCreatingAccount] = useState(false);
   const [isForgotPassword, setIsForgotPassword] = useState(false); // NOVO ESTADO
 
-  const { isDarkMode } = useChat();
+  const { isDarkMode, toggleTheme } = useChat();
   const styles = getLoginStyles(isDarkMode);
   const [customAlert, setCustomAlert] = useState({
     visible: false,
@@ -142,6 +142,9 @@ export default function LoginScreen() {
       style={styles.container}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
+      <TouchableOpacity onPress={toggleTheme} style={styles.themeButton}>
+        <Text style={styles.themeIcon}>{isDarkMode ? "☀️" : "🌙"}</Text>
+      </TouchableOpacity>
       <View style={styles.card}>
         <Text style={styles.title}>Lume</Text>
 
@@ -479,4 +482,20 @@ const getLoginStyles = (isDarkMode: boolean) =>
       alignItems: "center",
     },
     alertButtonText: { color: "#FFF", fontWeight: "bold", fontSize: 16 },
+    themeButton: {
+      position: "absolute",
+      top: 10,
+      right: 20,
+      padding: 8,
+      backgroundColor: isDarkMode ? "#333" : "#004494",
+      borderRadius: 20,
+      width: 40,
+      height: 40,
+      alignItems: "center",
+      justifyContent: "center",
+      zIndex: 10,
+    },
+    themeIcon: {
+      fontSize: 16,
+    },
   });

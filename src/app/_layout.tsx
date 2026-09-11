@@ -11,7 +11,6 @@ import {
 } from "firebase/firestore";
 import { useEffect, useState } from "react";
 import {
-  Alert,
   FlatList,
   Modal,
   Platform,
@@ -30,6 +29,16 @@ function MainLayout() {
   const [isMenuOpen, setIsMenuOpen] = useState(Platform.OS === "web");
   const [conversations, setConversations] = useState<any[]>([]);
   const [isSacVisible, setIsSacVisible] = useState(false);
+  const [isHideChatVisible, setIsHideChatVisible] = useState(false);
+  const [chatToHide, setChatToHide] = useState<{
+    id: string;
+    title: string;
+  } | null>(null);
+  const [customAlert, setCustomAlert] = useState({
+    visible: false,
+    title: "",
+    message: "",
+  });
   const [sacMessage, setSacMessage] = useState("");
   const [isSendingSac, setIsSendingSac] = useState(false);
 
@@ -42,6 +51,9 @@ function MainLayout() {
   const router = useRouter();
 
   const styles = getLayoutStyles(isDarkMode);
+  const showCustomAlert = (title: string, message: string) => {
+    setCustomAlert({ visible: true, title, message });
+  };
 
   useEffect(() => {
     if (isLoading) return;
@@ -85,31 +97,33 @@ function MainLayout() {
     setActiveSessionId(id);
     if (Platform.OS !== "web") setIsMenuOpen(false);
   };
-  const handleHideChat = (id: string, title: string) => {
-    Alert.alert(
-      "Excluir Conversa",
-      `Tem certeza que deseja excluir "${title || "Nova Conversa"}"?`,
-      [
-        { text: "Cancelar", style: "cancel" },
-        {
-          text: "Excluir",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              const chatRef = doc(db, "conversations", id);
-              await updateDoc(chatRef, { hidden: true });
+  const handleOpenHideChat = (id: string, title: string) => {
+    setChatToHide({
+      id,
+      title: title || "Nova Conversa",
+    });
 
-              if (activeSessionId === id) {
-                setActiveSessionId(null);
-              }
-            } catch (error) {
-              console.error("Erro ao excluir:", error);
-              Alert.alert("Erro", "Não foi possível excluir a conversa.");
-            }
-          },
-        },
-      ],
-    );
+    setIsHideChatVisible(true);
+  };
+  const handleConfirmHideChat = async () => {
+    if (!chatToHide) return;
+
+    try {
+      const chatRef = doc(db, "conversations", chatToHide.id);
+
+      await updateDoc(chatRef, {
+        hidden: true,
+      });
+
+      if (activeSessionId === chatToHide.id) {
+        setActiveSessionId(null);
+      }
+
+      setIsHideChatVisible(false);
+      setChatToHide(null);
+    } catch (error) {
+      console.error("Erro ao excluir conversa:", error);
+    }
   };
 
   const isLoginPage = segments[0] === "login";
@@ -134,7 +148,7 @@ function MainLayout() {
   }
   const handleSendSac = async () => {
     if (sacMessage.trim() === "") {
-      Alert.alert("Atenção", "Digite uma mensagem antes de enviar.");
+      showCustomAlert("Atenção", "Digite uma mensagem antes de enviar.");
       return;
     }
 
@@ -157,7 +171,7 @@ function MainLayout() {
       });
 
       if (response.ok) {
-        Alert.alert(
+        showCustomAlert(
           "Sucesso!",
           "Sua mensagem foi enviada. Responderemos em breve no seu e-mail.",
         );
@@ -167,7 +181,7 @@ function MainLayout() {
         throw new Error("Falha na requisição");
       }
     } catch (error) {
-      Alert.alert(
+      showCustomAlert(
         "Erro",
         "Não foi possível enviar a mensagem. Tente novamente mais tarde.",
       );
@@ -192,34 +206,26 @@ function MainLayout() {
             data={conversations}
             keyExtractor={(item) => item.id}
             renderItem={({ item }) => (
-              // 1. O contêiner externo DEVE ser uma View, nunca um TouchableOpacity
               <View
                 style={[
                   styles.historyItem,
                   activeSessionId === item.id && styles.historyItemActive,
-                  // Forçamos o layout em linha aqui para garantir que o ícone vá para a lateral
-                  {
-                    flexDirection: "row",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    padding: 0,
-                  },
                 ]}
               >
                 <TouchableOpacity
-                  style={{ flex: 1, padding: 12 }}
+                  style={styles.historyItemContent}
                   onPress={() => handleSelectChat(item.id)}
                 >
                   <Text style={styles.historyItemText} numberOfLines={1}>
                     {item.titulo || "Nova Conversa"}
                   </Text>
                 </TouchableOpacity>
+
                 <TouchableOpacity
-                  style={{ padding: 12 }}
-                  onPress={() => {
-                    handleHideChat(item.id, item.titulo);
-                    console.log("Clicou no ícone de lixeira");
-                  }}
+                  style={styles.hideChatButton}
+                  onPress={() =>
+                    handleOpenHideChat(item.id, item.titulo || "Nova Conversa")
+                  }
                 >
                   <Icon
                     name="trash-can-outline"
@@ -274,6 +280,46 @@ function MainLayout() {
         <Slot />
       </View>
       <Modal
+        visible={isHideChatVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => {
+          setIsHideChatVisible(false);
+          setChatToHide(null);
+        }}
+      >
+        <View style={styles.hideChatOverlay}>
+          <View style={styles.hideChatContainer}>
+            <Text style={styles.hideChatTitle}>Excluir conversa</Text>
+
+            <Text style={styles.hideChatMessage}>
+              Tem certeza que deseja excluir a conversa{" "}
+              <Text style={styles.hideChatChatName}>"{chatToHide?.title}"</Text>
+              ?
+            </Text>
+
+            <View style={styles.hideChatButtons}>
+              <TouchableOpacity
+                style={styles.hideChatCancelButton}
+                onPress={() => {
+                  setIsHideChatVisible(false);
+                  setChatToHide(null);
+                }}
+              >
+                <Text style={styles.hideChatCancelText}>Cancelar</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.hideChatConfirmButton}
+                onPress={handleConfirmHideChat}
+              >
+                <Text style={styles.hideChatConfirmText}>Excluir</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+      <Modal
         visible={isSacVisible}
         transparent={true}
         animationType="slide"
@@ -319,6 +365,37 @@ function MainLayout() {
                 </Text>
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </Modal>
+      <Modal
+        visible={customAlert.visible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() =>
+          setCustomAlert({
+            ...customAlert,
+            visible: false,
+          })
+        }
+      >
+        <View style={styles.alertOverlay}>
+          <View style={styles.alertBox}>
+            <Text style={styles.alertTitle}>{customAlert.title}</Text>
+
+            <Text style={styles.alertMessage}>{customAlert.message}</Text>
+
+            <TouchableOpacity
+              style={styles.alertButton}
+              onPress={() =>
+                setCustomAlert({
+                  ...customAlert,
+                  visible: false,
+                })
+              }
+            >
+              <Text style={styles.alertButtonText}>OK, entendi</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -368,7 +445,13 @@ const getLayoutStyles = (isDarkMode: boolean) =>
       marginBottom: 10,
       textTransform: "uppercase",
     },
-    historyItem: { padding: 12, borderRadius: 8, marginBottom: 4 },
+    historyItem: {
+      borderRadius: 8,
+      marginBottom: 4,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+    },
     historyItemActive: { backgroundColor: "#272753" },
     historyItemText: { color: "#ffffff", fontSize: 14 },
     historyPlaceholder: {
@@ -476,4 +559,127 @@ const getLayoutStyles = (isDarkMode: boolean) =>
       justifyContent: "center",
     },
     sendSacButtonText: { color: "#FFF", fontWeight: "bold", fontSize: 16 },
+
+    historyItemContent: {
+      flex: 1,
+      padding: 12,
+    },
+
+    hideChatButton: {
+      padding: 12,
+    },
+
+    hideChatOverlay: {
+      flex: 1,
+      backgroundColor: "rgba(0, 0, 0, 0.6)",
+      justifyContent: "center",
+      alignItems: "center",
+      padding: 20,
+    },
+
+    hideChatContainer: {
+      width: "100%",
+      maxWidth: 450,
+      backgroundColor: isDarkMode ? "#1E1E2D" : "#FFFFFF",
+      borderRadius: 16,
+      padding: 24,
+      elevation: 5,
+    },
+
+    hideChatTitle: {
+      fontSize: 22,
+      fontWeight: "bold",
+      color: isDarkMode ? "#FFFFFF" : "#222222",
+      marginBottom: 12,
+    },
+
+    hideChatMessage: {
+      fontSize: 15,
+      color: isDarkMode ? "#AAAAAA" : "#555555",
+      lineHeight: 22,
+      marginBottom: 24,
+    },
+
+    hideChatChatName: {
+      fontWeight: "bold",
+      color: isDarkMode ? "#FFFFFF" : "#222222",
+    },
+
+    hideChatButtons: {
+      flexDirection: "row",
+      justifyContent: "flex-end",
+      gap: 12,
+    },
+
+    hideChatCancelButton: {
+      paddingVertical: 10,
+      paddingHorizontal: 16,
+      borderRadius: 8,
+    },
+
+    hideChatCancelText: {
+      color: "#FF4D4D",
+      fontWeight: "bold",
+      fontSize: 16,
+    },
+
+    hideChatConfirmButton: {
+      backgroundColor: "#0056b3",
+      paddingVertical: 10,
+      paddingHorizontal: 20,
+      borderRadius: 8,
+    },
+
+    hideChatConfirmText: {
+      color: "#FFFFFF",
+      fontWeight: "bold",
+      fontSize: 16,
+    },
+    alertOverlay: {
+      flex: 1,
+      backgroundColor: "rgba(0,0,0,0.7)",
+      justifyContent: "center",
+      alignItems: "center",
+      padding: 20,
+    },
+
+    alertBox: {
+      width: "100%",
+      maxWidth: 350,
+      backgroundColor: "#1E1E2D",
+      borderRadius: 16,
+      padding: 24,
+      alignItems: "center",
+      elevation: 5,
+    },
+
+    alertTitle: {
+      fontSize: 20,
+      fontWeight: "bold",
+      color: "#FFF",
+      marginBottom: 12,
+      textAlign: "center",
+    },
+
+    alertMessage: {
+      fontSize: 15,
+      color: "#AAA",
+      textAlign: "center",
+      marginBottom: 24,
+      lineHeight: 22,
+    },
+
+    alertButton: {
+      backgroundColor: "#0056b3",
+      width: "100%",
+      paddingVertical: 12,
+      borderRadius: 8,
+      alignItems: "center",
+    },
+
+    alertButtonText: {
+      color: "#FFF",
+      fontWeight: "bold",
+      fontSize: 16,
+    },
   });
